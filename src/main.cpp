@@ -1,5 +1,6 @@
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -167,15 +168,19 @@ int main(int argc, char *argv[])
                         std::string lexeme = file_contents.substr(start, i - start + 1);
                         double value = std::stod(lexeme);
                         std::string literal;
-                        if (value == static_cast<long long>(value) && lexeme.find('.') == std::string::npos)
+                        if (lexeme.find('.') == std::string::npos)
                         {
                             literal = std::to_string(static_cast<long long>(value)) + ".0";
                         }
                         else
                         {
                             std::ostringstream oss;
-                            oss << value;
+                            oss << std::setprecision(15) << value;
                             literal = oss.str();
+                            if (literal.find('.') == std::string::npos)
+                            {
+                                literal += ".0";
+                            }
                         }
                         std::cout << "NUMBER " << lexeme << " " << literal << std::endl;
                     }
