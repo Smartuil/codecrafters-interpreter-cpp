@@ -184,6 +184,16 @@ int main(int argc, char *argv[])
                         }
                         std::cout << "NUMBER " << lexeme << " " << literal << std::endl;
                     }
+                    else if (std::isalpha(c) || c == '_')
+                    {
+                        size_t start = i;
+                        while (i + 1 < file_contents.size() && (std::isalnum(file_contents[i + 1]) || file_contents[i + 1] == '_'))
+                        {
+                            i++;
+                        }
+                        std::string lexeme = file_contents.substr(start, i - start + 1);
+                        std::cout << "IDENTIFIER " << lexeme << " null" << std::endl;
+                    }
                     else if (c == '\n')
                     {
                         line++;
