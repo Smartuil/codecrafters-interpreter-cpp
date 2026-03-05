@@ -108,6 +108,20 @@ int main(int argc, char *argv[])
                         std::cout << "GREATER > null" << std::endl;
                     }
                     break;
+                case '/':
+                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '/')
+                    {
+                        while (i < file_contents.size() && file_contents[i] != '\n')
+                        {
+                            i++;
+                        }
+                        i--;
+                    }
+                    else
+                    {
+                        std::cout << "SLASH / null" << std::endl;
+                    }
+                    break;
                 default:
                     if (c == '\n')
                     {
