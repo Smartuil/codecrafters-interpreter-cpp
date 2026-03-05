@@ -122,6 +122,31 @@ int main(int argc, char *argv[])
                         std::cout << "SLASH / null" << std::endl;
                     }
                     break;
+                case '"':
+                {
+                    size_t start = i;
+                    i++;
+                    while (i < file_contents.size() && file_contents[i] != '"')
+                    {
+                        if (file_contents[i] == '\n')
+                        {
+                            line++;
+                        }
+                        i++;
+                    }
+                    if (i >= file_contents.size())
+                    {
+                        std::cerr << "[line " << line << "] Error: Unterminated string." << std::endl;
+                        has_error = true;
+                    }
+                    else
+                    {
+                        std::string lexeme = file_contents.substr(start, i - start + 1);
+                        std::string literal = file_contents.substr(start + 1, i - start - 1);
+                        std::cout << "STRING " << lexeme << " " << literal << std::endl;
+                    }
+                    break;
+                }
                 default:
                     if (c == '\n')
                     {
