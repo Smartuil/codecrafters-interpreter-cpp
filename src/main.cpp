@@ -148,7 +148,38 @@ int main(int argc, char *argv[])
                     break;
                 }
                 default:
-                    if (c == '\n')
+                    if (std::isdigit(c))
+                    {
+                        size_t start = i;
+                        while (i + 1 < file_contents.size() && std::isdigit(file_contents[i + 1]))
+                        {
+                            i++;
+                        }
+                        if (i + 1 < file_contents.size() && file_contents[i + 1] == '.' &&
+                            i + 2 < file_contents.size() && std::isdigit(file_contents[i + 2]))
+                        {
+                            i++;
+                            while (i + 1 < file_contents.size() && std::isdigit(file_contents[i + 1]))
+                            {
+                                i++;
+                            }
+                        }
+                        std::string lexeme = file_contents.substr(start, i - start + 1);
+                        double value = std::stod(lexeme);
+                        std::string literal;
+                        if (value == static_cast<long long>(value) && lexeme.find('.') == std::string::npos)
+                        {
+                            literal = std::to_string(static_cast<long long>(value)) + ".0";
+                        }
+                        else
+                        {
+                            std::ostringstream oss;
+                            oss << value;
+                            literal = oss.str();
+                        }
+                        std::cout << "NUMBER " << lexeme << " " << literal << std::endl;
+                    }
+                    else if (c == '\n')
                     {
                         line++;
                     }
