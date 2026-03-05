@@ -2,10 +2,18 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 
 std::string read_file_contents(const std::string& filename);
+
+static const std::map<std::string, std::string> keywords = {
+    {"and", "AND"}, {"class", "CLASS"}, {"else", "ELSE"}, {"false", "FALSE"},
+    {"for", "FOR"}, {"fun", "FUN"}, {"if", "IF"}, {"nil", "NIL"},
+    {"or", "OR"}, {"print", "PRINT"}, {"return", "RETURN"}, {"super", "SUPER"},
+    {"this", "THIS"}, {"true", "TRUE"}, {"var", "VAR"}, {"while", "WHILE"}
+};
 
 int main(int argc, char *argv[])
 {
@@ -192,7 +200,15 @@ int main(int argc, char *argv[])
                             i++;
                         }
                         std::string lexeme = file_contents.substr(start, i - start + 1);
-                        std::cout << "IDENTIFIER " << lexeme << " null" << std::endl;
+                        auto it = keywords.find(lexeme);
+                        if (it != keywords.end())
+                        {
+                            std::cout << it->second << " " << lexeme << " null" << std::endl;
+                        }
+                        else
+                        {
+                            std::cout << "IDENTIFIER " << lexeme << " null" << std::endl;
+                        }
                     }
                     else if (c == '\n')
                     {
