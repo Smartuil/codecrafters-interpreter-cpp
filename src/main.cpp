@@ -26,6 +26,8 @@ int main(int argc, char *argv[])
     if (command == "tokenize")
     {
         std::string file_contents = read_file_contents(argv[2]);
+        bool has_error = false;
+        int line = 1;
         
         for (size_t i = 0; i < file_contents.size(); i++)
         {
@@ -63,10 +65,24 @@ int main(int argc, char *argv[])
                     std::cout << "STAR * null" << std::endl;
                     break;
                 default:
+                    if (c == '\n')
+                    {
+                        line++;
+                    }
+                    else if (c != ' ' && c != '\t' && c != '\r')
+                    {
+                        std::cerr << "[line " << line << "] Error: Unexpected character: " << c << std::endl;
+                        has_error = true;
+                    }
                     break;
             }
         }
         std::cout << "EOF  null" << std::endl;
+        
+        if (has_error)
+        {
+            return 65;
+        }
     }
     else
     {
