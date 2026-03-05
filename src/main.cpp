@@ -86,6 +86,28 @@ int main(int argc, char *argv[])
                         std::cout << "BANG ! null" << std::endl;
                     }
                     break;
+                case '<':
+                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '=')
+                    {
+                        std::cout << "LESS_EQUAL <= null" << std::endl;
+                        i++;
+                    }
+                    else
+                    {
+                        std::cout << "LESS < null" << std::endl;
+                    }
+                    break;
+                case '>':
+                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '=')
+                    {
+                        std::cout << "GREATER_EQUAL >= null" << std::endl;
+                        i++;
+                    }
+                    else
+                    {
+                        std::cout << "GREATER > null" << std::endl;
+                    }
+                    break;
                 default:
                     if (c == '\n')
                     {
