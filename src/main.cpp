@@ -262,6 +262,14 @@ struct GroupExpr : Expr
     std::string print() const override { return "(group " + expr->print() + ")"; }
 };
 
+struct UnaryExpr : Expr
+{
+    std::string op;
+    std::unique_ptr<Expr> right;
+    UnaryExpr(const std::string& op, std::unique_ptr<Expr> r) : op(op), right(std::move(r)) {}
+    std::string print() const override { return "(" + op + " " + right->print() + ")"; }
+};
+
 // ============ Parser ============
 
 class Parser
@@ -299,6 +307,17 @@ private:
 
     std::unique_ptr<Expr> expression()
     {
+        return unary();
+    }
+
+    std::unique_ptr<Expr> unary()
+    {
+        if (check(TokenType::BANG) || check(TokenType::MINUS))
+        {
+            Token op = advance();
+            auto right = unary();
+            return std::make_unique<UnaryExpr>(op.lexeme, std::move(right));
+        }
         return primary();
     }
 
