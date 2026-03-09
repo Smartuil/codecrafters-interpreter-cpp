@@ -255,6 +255,13 @@ struct LiteralExpr : Expr
     std::string print() const override { return value; }
 };
 
+struct GroupExpr : Expr
+{
+    std::unique_ptr<Expr> expr;
+    GroupExpr(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
+    std::string print() const override { return "(group " + expr->print() + ")"; }
+};
+
 // ============ Parser ============
 
 class Parser
@@ -321,6 +328,20 @@ private:
         {
             Token tok = advance();
             return std::make_unique<LiteralExpr>(tok.literal);
+        }
+
+        if (check(TokenType::LEFT_PAREN))
+        {
+            advance();
+            auto expr = expression();
+            if (!check(TokenType::RIGHT_PAREN))
+            {
+                hasError_ = true;
+                std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after expression." << std::endl;
+                return nullptr;
+            }
+            advance();
+            return std::make_unique<GroupExpr>(std::move(expr));
         }
 
         hasError_ = true;
