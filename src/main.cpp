@@ -312,6 +312,11 @@ private:
             advance();
             return std::make_unique<LiteralExpr>("nil");
         }
+        if (check(TokenType::NUMBER))
+        {
+            Token tok = advance();
+            return std::make_unique<LiteralExpr>(tok.literal);
+        }
 
         hasError_ = true;
         std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect expression." << std::endl;
