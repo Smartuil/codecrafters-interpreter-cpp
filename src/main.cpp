@@ -270,6 +270,19 @@ struct UnaryExpr : Expr
     std::string print() const override { return "(" + op + " " + right->print() + ")"; }
 };
 
+struct BinaryExpr : Expr
+{
+    std::unique_ptr<Expr> left;
+    std::string op;
+    std::unique_ptr<Expr> right;
+    BinaryExpr(std::unique_ptr<Expr> l, const std::string& op, std::unique_ptr<Expr> r)
+        : left(std::move(l)), op(op), right(std::move(r)) {}
+    std::string print() const override
+    {
+        return "(" + op + " " + left->print() + " " + right->print() + ")";
+    }
+};
+
 // ============ Parser ============
 
 class Parser
@@ -307,7 +320,19 @@ private:
 
     std::unique_ptr<Expr> expression()
     {
-        return unary();
+        return multiplication();
+    }
+
+    std::unique_ptr<Expr> multiplication()
+    {
+        auto left = unary();
+        while (check(TokenType::STAR) || check(TokenType::SLASH))
+        {
+            Token op = advance();
+            auto right = unary();
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+        }
+        return left;
     }
 
     std::unique_ptr<Expr> unary()
