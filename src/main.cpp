@@ -320,7 +320,19 @@ private:
 
     std::unique_ptr<Expr> expression()
     {
-        return comparison();
+        return equality();
+    }
+
+    std::unique_ptr<Expr> equality()
+    {
+        auto left = comparison();
+        while (check(TokenType::EQUAL_EQUAL) || check(TokenType::BANG_EQUAL))
+        {
+            Token op = advance();
+            auto right = comparison();
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+        }
+        return left;
     }
 
     std::unique_ptr<Expr> comparison()
