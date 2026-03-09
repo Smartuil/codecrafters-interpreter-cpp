@@ -320,7 +320,19 @@ private:
 
     std::unique_ptr<Expr> expression()
     {
-        return multiplication();
+        return addition();
+    }
+
+    std::unique_ptr<Expr> addition()
+    {
+        auto left = multiplication();
+        while (check(TokenType::PLUS) || check(TokenType::MINUS))
+        {
+            Token op = advance();
+            auto right = multiplication();
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+        }
+        return left;
     }
 
     std::unique_ptr<Expr> multiplication()
