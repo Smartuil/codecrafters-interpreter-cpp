@@ -3,25 +3,333 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
+
+// ============ Token ============
+
+enum class TokenType
+{
+    // Single-character tokens
+    LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE,
+    COMMA, DOT, MINUS, PLUS, SEMICOLON, SLASH, STAR,
+
+    // One or two character tokens
+    BANG, BANG_EQUAL, EQUAL, EQUAL_EQUAL,
+    GREATER, GREATER_EQUAL, LESS, LESS_EQUAL,
+
+    // Literals
+    IDENTIFIER, STRING, NUMBER,
+
+    // Keywords
+    AND, CLASS, ELSE, FALSE, FOR, FUN, IF, NIL, OR,
+    PRINT, RETURN, SUPER, THIS, TRUE, VAR, WHILE,
+
+    EOF_TOKEN
+};
+
+static const std::map<TokenType, std::string> tokenTypeNames = {
+    {TokenType::LEFT_PAREN, "LEFT_PAREN"}, {TokenType::RIGHT_PAREN, "RIGHT_PAREN"},
+    {TokenType::LEFT_BRACE, "LEFT_BRACE"}, {TokenType::RIGHT_BRACE, "RIGHT_BRACE"},
+    {TokenType::COMMA, "COMMA"}, {TokenType::DOT, "DOT"},
+    {TokenType::MINUS, "MINUS"}, {TokenType::PLUS, "PLUS"},
+    {TokenType::SEMICOLON, "SEMICOLON"}, {TokenType::SLASH, "SLASH"},
+    {TokenType::STAR, "STAR"}, {TokenType::BANG, "BANG"},
+    {TokenType::BANG_EQUAL, "BANG_EQUAL"}, {TokenType::EQUAL, "EQUAL"},
+    {TokenType::EQUAL_EQUAL, "EQUAL_EQUAL"}, {TokenType::GREATER, "GREATER"},
+    {TokenType::GREATER_EQUAL, "GREATER_EQUAL"}, {TokenType::LESS, "LESS"},
+    {TokenType::LESS_EQUAL, "LESS_EQUAL"}, {TokenType::IDENTIFIER, "IDENTIFIER"},
+    {TokenType::STRING, "STRING"}, {TokenType::NUMBER, "NUMBER"},
+    {TokenType::AND, "AND"}, {TokenType::CLASS, "CLASS"},
+    {TokenType::ELSE, "ELSE"}, {TokenType::FALSE, "FALSE"},
+    {TokenType::FOR, "FOR"}, {TokenType::FUN, "FUN"},
+    {TokenType::IF, "IF"}, {TokenType::NIL, "NIL"},
+    {TokenType::OR, "OR"}, {TokenType::PRINT, "PRINT"},
+    {TokenType::RETURN, "RETURN"}, {TokenType::SUPER, "SUPER"},
+    {TokenType::THIS, "THIS"}, {TokenType::TRUE, "TRUE"},
+    {TokenType::VAR, "VAR"}, {TokenType::WHILE, "WHILE"},
+    {TokenType::EOF_TOKEN, "EOF"}
+};
+
+static const std::map<std::string, TokenType> keywordTypes = {
+    {"and", TokenType::AND}, {"class", TokenType::CLASS}, {"else", TokenType::ELSE},
+    {"false", TokenType::FALSE}, {"for", TokenType::FOR}, {"fun", TokenType::FUN},
+    {"if", TokenType::IF}, {"nil", TokenType::NIL}, {"or", TokenType::OR},
+    {"print", TokenType::PRINT}, {"return", TokenType::RETURN}, {"super", TokenType::SUPER},
+    {"this", TokenType::THIS}, {"true", TokenType::TRUE}, {"var", TokenType::VAR},
+    {"while", TokenType::WHILE}
+};
+
+struct Token
+{
+    TokenType type;
+    std::string lexeme;
+    std::string literal;
+    int line;
+
+    std::string toString() const
+    {
+        return tokenTypeNames.at(type) + " " + lexeme + " " + literal;
+    }
+};
+
+// ============ Scanner ============
+
+class Scanner
+{
+public:
+    Scanner(const std::string& source) : source_(source) {}
+
+    std::vector<Token> scanTokens()
+    {
+        while (current_ < source_.size())
+        {
+            scanToken();
+        }
+        tokens_.push_back({TokenType::EOF_TOKEN, "", "null", line_});
+        return tokens_;
+    }
+
+    bool hasError() const { return hasError_; }
+
+private:
+    std::string source_;
+    std::vector<Token> tokens_;
+    size_t current_ = 0;
+    int line_ = 1;
+    bool hasError_ = false;
+
+    char advance() { return source_[current_++]; }
+    char peek() const { return current_ < source_.size() ? source_[current_] : '\0'; }
+    char peekNext() const { return current_ + 1 < source_.size() ? source_[current_ + 1] : '\0'; }
+
+    bool match(char expected)
+    {
+        if (current_ >= source_.size() || source_[current_] != expected) return false;
+        current_++;
+        return true;
+    }
+
+    void addToken(TokenType type, const std::string& lexeme, const std::string& literal)
+    {
+        tokens_.push_back({type, lexeme, literal, line_});
+    }
+
+    void scanToken()
+    {
+        char c = advance();
+        switch (c)
+        {
+            case '(': addToken(TokenType::LEFT_PAREN, "(", "null"); break;
+            case ')': addToken(TokenType::RIGHT_PAREN, ")", "null"); break;
+            case '{': addToken(TokenType::LEFT_BRACE, "{", "null"); break;
+            case '}': addToken(TokenType::RIGHT_BRACE, "}", "null"); break;
+            case ',': addToken(TokenType::COMMA, ",", "null"); break;
+            case '.': addToken(TokenType::DOT, ".", "null"); break;
+            case '-': addToken(TokenType::MINUS, "-", "null"); break;
+            case '+': addToken(TokenType::PLUS, "+", "null"); break;
+            case ';': addToken(TokenType::SEMICOLON, ";", "null"); break;
+            case '*': addToken(TokenType::STAR, "*", "null"); break;
+            case '=':
+                if (match('=')) addToken(TokenType::EQUAL_EQUAL, "==", "null");
+                else addToken(TokenType::EQUAL, "=", "null");
+                break;
+            case '!':
+                if (match('=')) addToken(TokenType::BANG_EQUAL, "!=", "null");
+                else addToken(TokenType::BANG, "!", "null");
+                break;
+            case '<':
+                if (match('=')) addToken(TokenType::LESS_EQUAL, "<=", "null");
+                else addToken(TokenType::LESS, "<", "null");
+                break;
+            case '>':
+                if (match('=')) addToken(TokenType::GREATER_EQUAL, ">=", "null");
+                else addToken(TokenType::GREATER, ">", "null");
+                break;
+            case '/':
+                if (match('/'))
+                {
+                    while (current_ < source_.size() && source_[current_] != '\n') current_++;
+                }
+                else
+                {
+                    addToken(TokenType::SLASH, "/", "null");
+                }
+                break;
+            case '"': scanString(); break;
+            case '\n': line_++; break;
+            case ' ': case '\r': case '\t': break;
+            default:
+                if (std::isdigit(c)) scanNumber(c);
+                else if (std::isalpha(c) || c == '_') scanIdentifier(c);
+                else
+                {
+                    std::cerr << "[line " << line_ << "] Error: Unexpected character: " << c << std::endl;
+                    hasError_ = true;
+                }
+                break;
+        }
+    }
+
+    void scanString()
+    {
+        size_t start = current_ - 1;
+        while (current_ < source_.size() && source_[current_] != '"')
+        {
+            if (source_[current_] == '\n') line_++;
+            current_++;
+        }
+        if (current_ >= source_.size())
+        {
+            std::cerr << "[line " << line_ << "] Error: Unterminated string." << std::endl;
+            hasError_ = true;
+            return;
+        }
+        current_++;
+        std::string lexeme = source_.substr(start, current_ - start);
+        std::string literal = source_.substr(start + 1, current_ - start - 2);
+        addToken(TokenType::STRING, lexeme, literal);
+    }
+
+    void scanNumber(char first)
+    {
+        size_t start = current_ - 1;
+        while (current_ < source_.size() && std::isdigit(source_[current_])) current_++;
+        if (current_ < source_.size() && source_[current_] == '.' &&
+            current_ + 1 < source_.size() && std::isdigit(source_[current_ + 1]))
+        {
+            current_++;
+            while (current_ < source_.size() && std::isdigit(source_[current_])) current_++;
+        }
+        std::string lexeme = source_.substr(start, current_ - start);
+        double value = std::stod(lexeme);
+        std::string literal;
+        if (lexeme.find('.') == std::string::npos)
+        {
+            literal = std::to_string(static_cast<long long>(value)) + ".0";
+        }
+        else
+        {
+            std::ostringstream oss;
+            oss << std::setprecision(15) << value;
+            literal = oss.str();
+            if (literal.find('.') == std::string::npos)
+            {
+                literal += ".0";
+            }
+        }
+        addToken(TokenType::NUMBER, lexeme, literal);
+    }
+
+    void scanIdentifier(char first)
+    {
+        size_t start = current_ - 1;
+        while (current_ < source_.size() && (std::isalnum(source_[current_]) || source_[current_] == '_')) current_++;
+        std::string lexeme = source_.substr(start, current_ - start);
+        auto it = keywordTypes.find(lexeme);
+        if (it != keywordTypes.end())
+        {
+            addToken(it->second, lexeme, "null");
+        }
+        else
+        {
+            addToken(TokenType::IDENTIFIER, lexeme, "null");
+        }
+    }
+};
+
+// ============ AST ============
+
+struct Expr
+{
+    virtual ~Expr() = default;
+    virtual std::string print() const = 0;
+};
+
+struct LiteralExpr : Expr
+{
+    std::string value;
+    LiteralExpr(const std::string& v) : value(v) {}
+    std::string print() const override { return value; }
+};
+
+// ============ Parser ============
+
+class Parser
+{
+public:
+    Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
+
+    std::unique_ptr<Expr> parse()
+    {
+        return expression();
+    }
+
+    bool hasError() const { return hasError_; }
+
+private:
+    std::vector<Token> tokens_;
+    size_t current_ = 0;
+    bool hasError_ = false;
+
+    const Token& peek() const { return tokens_[current_]; }
+    const Token& previous() const { return tokens_[current_ - 1]; }
+    bool isAtEnd() const { return peek().type == TokenType::EOF_TOKEN; }
+
+    Token advance()
+    {
+        if (!isAtEnd()) current_++;
+        return previous();
+    }
+
+    bool check(TokenType type) const
+    {
+        if (isAtEnd()) return false;
+        return peek().type == type;
+    }
+
+    std::unique_ptr<Expr> expression()
+    {
+        return primary();
+    }
+
+    std::unique_ptr<Expr> primary()
+    {
+        if (check(TokenType::TRUE))
+        {
+            advance();
+            return std::make_unique<LiteralExpr>("true");
+        }
+        if (check(TokenType::FALSE))
+        {
+            advance();
+            return std::make_unique<LiteralExpr>("false");
+        }
+        if (check(TokenType::NIL))
+        {
+            advance();
+            return std::make_unique<LiteralExpr>("nil");
+        }
+
+        hasError_ = true;
+        std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect expression." << std::endl;
+        return nullptr;
+    }
+};
+
+// ============ Helpers ============
 
 std::string read_file_contents(const std::string& filename);
 
-static const std::map<std::string, std::string> keywords = {
-    {"and", "AND"}, {"class", "CLASS"}, {"else", "ELSE"}, {"false", "FALSE"},
-    {"for", "FOR"}, {"fun", "FUN"}, {"if", "IF"}, {"nil", "NIL"},
-    {"or", "OR"}, {"print", "PRINT"}, {"return", "RETURN"}, {"super", "SUPER"},
-    {"this", "THIS"}, {"true", "TRUE"}, {"var", "VAR"}, {"while", "WHILE"}
-};
+// ============ Main ============
 
 int main(int argc, char *argv[])
 {
-    // Disable output buffering
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
     std::cerr << "Logs from your program will appear here!" << std::endl;
 
     if (argc < 3)
@@ -35,198 +343,27 @@ int main(int argc, char *argv[])
     if (command == "tokenize")
     {
         std::string file_contents = read_file_contents(argv[2]);
-        bool has_error = false;
-        int line = 1;
-        
-        for (size_t i = 0; i < file_contents.size(); i++)
+        Scanner scanner(file_contents);
+        auto tokens = scanner.scanTokens();
+        for (const auto& token : tokens)
         {
-            char c = file_contents[i];
-            switch (c)
-            {
-                case '(':
-                    std::cout << "LEFT_PAREN ( null" << std::endl;
-                    break;
-                case ')':
-                    std::cout << "RIGHT_PAREN ) null" << std::endl;
-                    break;
-                case '{':
-                    std::cout << "LEFT_BRACE { null" << std::endl;
-                    break;
-                case '}':
-                    std::cout << "RIGHT_BRACE } null" << std::endl;
-                    break;
-                case ',':
-                    std::cout << "COMMA , null" << std::endl;
-                    break;
-                case '.':
-                    std::cout << "DOT . null" << std::endl;
-                    break;
-                case '-':
-                    std::cout << "MINUS - null" << std::endl;
-                    break;
-                case '+':
-                    std::cout << "PLUS + null" << std::endl;
-                    break;
-                case ';':
-                    std::cout << "SEMICOLON ; null" << std::endl;
-                    break;
-                case '*':
-                    std::cout << "STAR * null" << std::endl;
-                    break;
-                case '=':
-                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '=')
-                    {
-                        std::cout << "EQUAL_EQUAL == null" << std::endl;
-                        i++;
-                    }
-                    else
-                    {
-                        std::cout << "EQUAL = null" << std::endl;
-                    }
-                    break;
-                case '!':
-                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '=')
-                    {
-                        std::cout << "BANG_EQUAL != null" << std::endl;
-                        i++;
-                    }
-                    else
-                    {
-                        std::cout << "BANG ! null" << std::endl;
-                    }
-                    break;
-                case '<':
-                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '=')
-                    {
-                        std::cout << "LESS_EQUAL <= null" << std::endl;
-                        i++;
-                    }
-                    else
-                    {
-                        std::cout << "LESS < null" << std::endl;
-                    }
-                    break;
-                case '>':
-                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '=')
-                    {
-                        std::cout << "GREATER_EQUAL >= null" << std::endl;
-                        i++;
-                    }
-                    else
-                    {
-                        std::cout << "GREATER > null" << std::endl;
-                    }
-                    break;
-                case '/':
-                    if (i + 1 < file_contents.size() && file_contents[i + 1] == '/')
-                    {
-                        while (i < file_contents.size() && file_contents[i] != '\n')
-                        {
-                            i++;
-                        }
-                        i--;
-                    }
-                    else
-                    {
-                        std::cout << "SLASH / null" << std::endl;
-                    }
-                    break;
-                case '"':
-                {
-                    size_t start = i;
-                    i++;
-                    while (i < file_contents.size() && file_contents[i] != '"')
-                    {
-                        if (file_contents[i] == '\n')
-                        {
-                            line++;
-                        }
-                        i++;
-                    }
-                    if (i >= file_contents.size())
-                    {
-                        std::cerr << "[line " << line << "] Error: Unterminated string." << std::endl;
-                        has_error = true;
-                    }
-                    else
-                    {
-                        std::string lexeme = file_contents.substr(start, i - start + 1);
-                        std::string literal = file_contents.substr(start + 1, i - start - 1);
-                        std::cout << "STRING " << lexeme << " " << literal << std::endl;
-                    }
-                    break;
-                }
-                default:
-                    if (std::isdigit(c))
-                    {
-                        size_t start = i;
-                        while (i + 1 < file_contents.size() && std::isdigit(file_contents[i + 1]))
-                        {
-                            i++;
-                        }
-                        if (i + 1 < file_contents.size() && file_contents[i + 1] == '.' &&
-                            i + 2 < file_contents.size() && std::isdigit(file_contents[i + 2]))
-                        {
-                            i++;
-                            while (i + 1 < file_contents.size() && std::isdigit(file_contents[i + 1]))
-                            {
-                                i++;
-                            }
-                        }
-                        std::string lexeme = file_contents.substr(start, i - start + 1);
-                        double value = std::stod(lexeme);
-                        std::string literal;
-                        if (lexeme.find('.') == std::string::npos)
-                        {
-                            literal = std::to_string(static_cast<long long>(value)) + ".0";
-                        }
-                        else
-                        {
-                            std::ostringstream oss;
-                            oss << std::setprecision(15) << value;
-                            literal = oss.str();
-                            if (literal.find('.') == std::string::npos)
-                            {
-                                literal += ".0";
-                            }
-                        }
-                        std::cout << "NUMBER " << lexeme << " " << literal << std::endl;
-                    }
-                    else if (std::isalpha(c) || c == '_')
-                    {
-                        size_t start = i;
-                        while (i + 1 < file_contents.size() && (std::isalnum(file_contents[i + 1]) || file_contents[i + 1] == '_'))
-                        {
-                            i++;
-                        }
-                        std::string lexeme = file_contents.substr(start, i - start + 1);
-                        auto it = keywords.find(lexeme);
-                        if (it != keywords.end())
-                        {
-                            std::cout << it->second << " " << lexeme << " null" << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << "IDENTIFIER " << lexeme << " null" << std::endl;
-                        }
-                    }
-                    else if (c == '\n')
-                    {
-                        line++;
-                    }
-                    else if (c != ' ' && c != '\t' && c != '\r')
-                    {
-                        std::cerr << "[line " << line << "] Error: Unexpected character: " << c << std::endl;
-                        has_error = true;
-                    }
-                    break;
-            }
+            std::cout << token.toString() << std::endl;
         }
-        std::cout << "EOF  null" << std::endl;
-        
-        if (has_error)
+        if (scanner.hasError()) return 65;
+    }
+    else if (command == "parse")
+    {
+        std::string file_contents = read_file_contents(argv[2]);
+        Scanner scanner(file_contents);
+        auto tokens = scanner.scanTokens();
+        if (scanner.hasError()) return 65;
+
+        Parser parser(tokens);
+        auto expr = parser.parse();
+        if (parser.hasError()) return 65;
+        if (expr)
         {
-            return 65;
+            std::cout << expr->print() << std::endl;
         }
     }
     else
