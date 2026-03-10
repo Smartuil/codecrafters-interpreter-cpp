@@ -296,11 +296,32 @@ struct LoxValue
     }
 };
 
+// ============ Environment ============
+
+class Environment
+{
+public:
+    void define(const std::string& name, const LoxValue& value)
+    {
+        values_[name] = value;
+    }
+
+    LoxValue get(const std::string& name, int line) const
+    {
+        auto it = values_.find(name);
+        if (it != values_.end()) return it->second;
+        throw RuntimeError("Undefined variable '" + name + "'.", line);
+    }
+
+private:
+    std::map<std::string, LoxValue> values_;
+};
+
 struct Expr
 {
     virtual ~Expr() = default;
     virtual std::string print() const = 0;
-    virtual LoxValue evaluate() const = 0;
+    virtual LoxValue evaluate(Environment& env) const = 0;
 };
 
 struct LiteralExpr : Expr
@@ -309,7 +330,7 @@ struct LiteralExpr : Expr
     ValueType litType;
     LiteralExpr(const std::string& v, ValueType t = ValueType::NIL) : value(v), litType(t) {}
     std::string print() const override { return value; }
-    LoxValue evaluate() const override
+    LoxValue evaluate(Environment& env) const override
     {
         switch (litType)
         {
@@ -327,7 +348,7 @@ struct GroupExpr : Expr
     std::unique_ptr<Expr> expr;
     GroupExpr(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
     std::string print() const override { return "(group " + expr->print() + ")"; }
-    LoxValue evaluate() const override { return expr->evaluate(); }
+    LoxValue evaluate(Environment& env) const override { return expr->evaluate(env); }
 };
 
 struct UnaryExpr : Expr
@@ -338,9 +359,9 @@ struct UnaryExpr : Expr
     UnaryExpr(const std::string& op, std::unique_ptr<Expr> r, int line)
         : op(op), right(std::move(r)), line(line) {}
     std::string print() const override { return "(" + op + " " + right->print() + ")"; }
-    LoxValue evaluate() const override
+    LoxValue evaluate(Environment& env) const override
     {
-        LoxValue val = right->evaluate();
+        LoxValue val = right->evaluate(env);
         if (op == "-")
         {
             if (val.type != ValueType::NUMBER)
@@ -373,10 +394,10 @@ struct BinaryExpr : Expr
     {
         return "(" + op + " " + left->print() + " " + right->print() + ")";
     }
-    LoxValue evaluate() const override
+    LoxValue evaluate(Environment& env) const override
     {
-        LoxValue l = left->evaluate();
-        LoxValue r = right->evaluate();
+        LoxValue l = left->evaluate(env);
+        LoxValue r = right->evaluate(env);
         if (op == "+")
         {
             if (l.type == ValueType::STRING && r.type == ValueType::STRING)
@@ -447,21 +468,33 @@ struct BinaryExpr : Expr
     }
 };
 
+struct VariableExpr : Expr
+{
+    std::string name;
+    int line;
+    VariableExpr(const std::string& name, int line) : name(name), line(line) {}
+    std::string print() const override { return name; }
+    LoxValue evaluate(Environment& env) const override
+    {
+        return env.get(name, line);
+    }
+};
+
 // ============ Statements ============
 
 struct Stmt
 {
     virtual ~Stmt() = default;
-    virtual void execute() const = 0;
+    virtual void execute(Environment& env) const = 0;
 };
 
 struct PrintStmt : Stmt
 {
     std::unique_ptr<Expr> expr;
     PrintStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
-    void execute() const override
+    void execute(Environment& env) const override
     {
-        LoxValue val = expr->evaluate();
+        LoxValue val = expr->evaluate(env);
         std::cout << val.toString() << std::endl;
     }
 };
@@ -470,9 +503,26 @@ struct ExpressionStmt : Stmt
 {
     std::unique_ptr<Expr> expr;
     ExpressionStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
-    void execute() const override
+    void execute(Environment& env) const override
     {
-        expr->evaluate();
+        expr->evaluate(env);
+    }
+};
+
+struct VarStmt : Stmt
+{
+    std::string name;
+    std::unique_ptr<Expr> initializer;
+    VarStmt(const std::string& name, std::unique_ptr<Expr> init)
+        : name(name), initializer(std::move(init)) {}
+    void execute(Environment& env) const override
+    {
+        LoxValue value = LoxValue::Nil();
+        if (initializer)
+        {
+            value = initializer->evaluate(env);
+        }
+        env.define(name, value);
     }
 };
 
@@ -493,7 +543,7 @@ public:
         std::vector<std::unique_ptr<Stmt>> stmts;
         while (!isAtEnd())
         {
-            auto s = statement();
+            auto s = declaration();
             if (s) stmts.push_back(std::move(s));
         }
         return stmts;
@@ -614,6 +664,11 @@ private:
             Token tok = advance();
             return std::make_unique<LiteralExpr>(tok.literal, ValueType::STRING);
         }
+        if (check(TokenType::IDENTIFIER))
+        {
+            Token tok = advance();
+            return std::make_unique<VariableExpr>(tok.lexeme, tok.line);
+        }
 
         if (check(TokenType::LEFT_PAREN))
         {
@@ -632,6 +687,43 @@ private:
         hasError_ = true;
         std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect expression." << std::endl;
         return nullptr;
+    }
+
+    std::unique_ptr<Stmt> declaration()
+    {
+        if (check(TokenType::VAR))
+        {
+            advance();
+            return varDeclaration();
+        }
+        return statement();
+    }
+
+    std::unique_ptr<Stmt> varDeclaration()
+    {
+        if (!check(TokenType::IDENTIFIER))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect variable name." << std::endl;
+            return nullptr;
+        }
+        Token name = advance();
+
+        std::unique_ptr<Expr> initializer = nullptr;
+        if (check(TokenType::EQUAL))
+        {
+            advance();
+            initializer = expression();
+        }
+
+        if (!check(TokenType::SEMICOLON))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after variable declaration." << std::endl;
+            return nullptr;
+        }
+        advance();
+        return std::make_unique<VarStmt>(name.lexeme, std::move(initializer));
     }
 
     std::unique_ptr<Stmt> statement()
@@ -732,7 +824,8 @@ int main(int argc, char *argv[])
         {
             try
             {
-                LoxValue result = expr->evaluate();
+                Environment env;
+                LoxValue result = expr->evaluate(env);
                 std::cout << result.toString() << std::endl;
             }
             catch (const RuntimeError& e)
@@ -756,9 +849,10 @@ int main(int argc, char *argv[])
 
         try
         {
+            Environment env;
             for (const auto& stmt : stmts)
             {
-                stmt->execute();
+                stmt->execute(env);
             }
         }
         catch (const RuntimeError& e)
