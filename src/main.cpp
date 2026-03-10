@@ -403,10 +403,30 @@ struct BinaryExpr : Expr
                 throw RuntimeError("Operands must be numbers.", line);
             return LoxValue::Number(l.numVal / r.numVal);
         }
-        if (op == ">") return LoxValue::Bool(l.numVal > r.numVal);
-        if (op == ">=") return LoxValue::Bool(l.numVal >= r.numVal);
-        if (op == "<") return LoxValue::Bool(l.numVal < r.numVal);
-        if (op == "<=") return LoxValue::Bool(l.numVal <= r.numVal);
+        if (op == ">")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Bool(l.numVal > r.numVal);
+        }
+        if (op == ">=")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Bool(l.numVal >= r.numVal);
+        }
+        if (op == "<")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Bool(l.numVal < r.numVal);
+        }
+        if (op == "<=")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Bool(l.numVal <= r.numVal);
+        }
         if (op == "==")
         {
             if (l.type != r.type) return LoxValue::Bool(false);
