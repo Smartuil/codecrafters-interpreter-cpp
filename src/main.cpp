@@ -367,7 +367,12 @@ struct BinaryExpr : Expr
     {
         LoxValue l = left->evaluate();
         LoxValue r = right->evaluate();
-        if (op == "+") return LoxValue::Number(l.numVal + r.numVal);
+        if (op == "+")
+        {
+            if (l.type == ValueType::STRING && r.type == ValueType::STRING)
+                return LoxValue::String(l.strVal + r.strVal);
+            return LoxValue::Number(l.numVal + r.numVal);
+        }
         if (op == "-") return LoxValue::Number(l.numVal - r.numVal);
         if (op == "*") return LoxValue::Number(l.numVal * r.numVal);
         if (op == "/") return LoxValue::Number(l.numVal / r.numVal);
