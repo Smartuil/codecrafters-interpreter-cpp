@@ -381,9 +381,16 @@ struct BinaryExpr : Expr
         {
             if (l.type == ValueType::STRING && r.type == ValueType::STRING)
                 return LoxValue::String(l.strVal + r.strVal);
-            return LoxValue::Number(l.numVal + r.numVal);
+            if (l.type == ValueType::NUMBER && r.type == ValueType::NUMBER)
+                return LoxValue::Number(l.numVal + r.numVal);
+            throw RuntimeError("Operands must be two numbers or two strings.", line);
         }
-        if (op == "-") return LoxValue::Number(l.numVal - r.numVal);
+        if (op == "-")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Number(l.numVal - r.numVal);
+        }
         if (op == "*")
         {
             if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
