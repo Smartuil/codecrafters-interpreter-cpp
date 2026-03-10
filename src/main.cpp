@@ -301,6 +301,9 @@ struct LoxValue
 class Environment
 {
 public:
+    Environment() : enclosing_(nullptr) {}
+    Environment(Environment* enclosing) : enclosing_(enclosing) {}
+
     void define(const std::string& name, const LoxValue& value)
     {
         values_[name] = value;
@@ -310,6 +313,7 @@ public:
     {
         auto it = values_.find(name);
         if (it != values_.end()) return it->second;
+        if (enclosing_) return enclosing_->get(name, line);
         throw RuntimeError("Undefined variable '" + name + "'.", line);
     }
 
@@ -321,10 +325,16 @@ public:
             it->second = value;
             return;
         }
+        if (enclosing_)
+        {
+            enclosing_->assign(name, value, line);
+            return;
+        }
         throw RuntimeError("Undefined variable '" + name + "'.", line);
     }
 
 private:
+    Environment* enclosing_;
     std::map<std::string, LoxValue> values_;
 };
 
@@ -550,6 +560,21 @@ struct VarStmt : Stmt
             value = initializer->evaluate(env);
         }
         env.define(name, value);
+    }
+};
+
+struct BlockStmt : Stmt
+{
+    std::vector<std::unique_ptr<Stmt>> statements;
+    BlockStmt(std::vector<std::unique_ptr<Stmt>> stmts)
+        : statements(std::move(stmts)) {}
+    void execute(Environment& env) const override
+    {
+        Environment blockEnv(&env);
+        for (const auto& stmt : statements)
+        {
+            stmt->execute(blockEnv);
+        }
     }
 };
 
@@ -781,12 +806,35 @@ private:
 
     std::unique_ptr<Stmt> statement()
     {
+        if (check(TokenType::LEFT_BRACE))
+        {
+            advance();
+            return blockStatement();
+        }
         if (check(TokenType::PRINT))
         {
             advance();
             return printStatement();
         }
         return expressionStatement();
+    }
+
+    std::unique_ptr<Stmt> blockStatement()
+    {
+        std::vector<std::unique_ptr<Stmt>> stmts;
+        while (!check(TokenType::RIGHT_BRACE) && !isAtEnd())
+        {
+            auto s = declaration();
+            if (s) stmts.push_back(std::move(s));
+        }
+        if (!check(TokenType::RIGHT_BRACE))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at end: Expect '}' ." << std::endl;
+            return nullptr;
+        }
+        advance();
+        return std::make_unique<BlockStmt>(std::move(stmts));
     }
 
     std::unique_ptr<Stmt> printStatement()
