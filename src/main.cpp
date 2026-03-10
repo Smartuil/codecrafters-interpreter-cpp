@@ -242,10 +242,57 @@ private:
 
 // ============ AST ============
 
+enum class ValueType { NIL, BOOL, NUMBER, STRING };
+
+struct LoxValue
+{
+    ValueType type;
+    bool boolVal = false;
+    double numVal = 0.0;
+    std::string strVal;
+
+    static LoxValue Nil() { return {ValueType::NIL}; }
+    static LoxValue Bool(bool b) { return {ValueType::BOOL, b, 0.0, ""}; }
+    static LoxValue Number(double n) { return {ValueType::NUMBER, false, n, ""}; }
+    static LoxValue String(const std::string& s) { return {ValueType::STRING, false, 0.0, s}; }
+
+    std::string toString() const
+    {
+        switch (type)
+        {
+            case ValueType::NIL: return "nil";
+            case ValueType::BOOL: return boolVal ? "true" : "false";
+            case ValueType::NUMBER:
+            {
+                std::ostringstream oss;
+                oss << std::setprecision(15) << numVal;
+                std::string s = oss.str();
+                // 如果是整数值，去掉尾部的 .0
+                if (s.find('.') != std::string::npos)
+                {
+                    // 去掉尾部多余的0
+                    size_t dot = s.find('.');
+                    std::string afterDot = s.substr(dot + 1);
+                    bool allZero = true;
+                    for (char c : afterDot)
+                    {
+                        if (c != '0') { allZero = false; break; }
+                    }
+                    if (allZero) return s.substr(0, dot);
+                }
+                return s;
+            }
+            case ValueType::STRING: return strVal;
+        }
+        return "nil";
+    }
+};
+
 struct Expr
 {
     virtual ~Expr() = default;
     virtual std::string print() const = 0;
+    virtual LoxValue evaluate() const = 0;
 };
 
 struct LiteralExpr : Expr
@@ -253,6 +300,23 @@ struct LiteralExpr : Expr
     std::string value;
     LiteralExpr(const std::string& v) : value(v) {}
     std::string print() const override { return value; }
+    LoxValue evaluate() const override
+    {
+        if (value == "nil") return LoxValue::Nil();
+        if (value == "true") return LoxValue::Bool(true);
+        if (value == "false") return LoxValue::Bool(false);
+        // Try number
+        try
+        {
+            double d = std::stod(value);
+            return LoxValue::Number(d);
+        }
+        catch (...)
+        {
+            // It's a string
+            return LoxValue::String(value);
+        }
+    }
 };
 
 struct GroupExpr : Expr
@@ -260,6 +324,7 @@ struct GroupExpr : Expr
     std::unique_ptr<Expr> expr;
     GroupExpr(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
     std::string print() const override { return "(group " + expr->print() + ")"; }
+    LoxValue evaluate() const override { return expr->evaluate(); }
 };
 
 struct UnaryExpr : Expr
@@ -268,6 +333,23 @@ struct UnaryExpr : Expr
     std::unique_ptr<Expr> right;
     UnaryExpr(const std::string& op, std::unique_ptr<Expr> r) : op(op), right(std::move(r)) {}
     std::string print() const override { return "(" + op + " " + right->print() + ")"; }
+    LoxValue evaluate() const override
+    {
+        LoxValue val = right->evaluate();
+        if (op == "-")
+        {
+            return LoxValue::Number(-val.numVal);
+        }
+        if (op == "!")
+        {
+            // falsey: nil and false
+            bool truthy = true;
+            if (val.type == ValueType::NIL) truthy = false;
+            else if (val.type == ValueType::BOOL) truthy = val.boolVal;
+            return LoxValue::Bool(!truthy);
+        }
+        return LoxValue::Nil();
+    }
 };
 
 struct BinaryExpr : Expr
@@ -280,6 +362,36 @@ struct BinaryExpr : Expr
     std::string print() const override
     {
         return "(" + op + " " + left->print() + " " + right->print() + ")";
+    }
+    LoxValue evaluate() const override
+    {
+        LoxValue l = left->evaluate();
+        LoxValue r = right->evaluate();
+        if (op == "+") return LoxValue::Number(l.numVal + r.numVal);
+        if (op == "-") return LoxValue::Number(l.numVal - r.numVal);
+        if (op == "*") return LoxValue::Number(l.numVal * r.numVal);
+        if (op == "/") return LoxValue::Number(l.numVal / r.numVal);
+        if (op == ">") return LoxValue::Bool(l.numVal > r.numVal);
+        if (op == ">=") return LoxValue::Bool(l.numVal >= r.numVal);
+        if (op == "<") return LoxValue::Bool(l.numVal < r.numVal);
+        if (op == "<=") return LoxValue::Bool(l.numVal <= r.numVal);
+        if (op == "==")
+        {
+            if (l.type != r.type) return LoxValue::Bool(false);
+            if (l.type == ValueType::NIL) return LoxValue::Bool(true);
+            if (l.type == ValueType::BOOL) return LoxValue::Bool(l.boolVal == r.boolVal);
+            if (l.type == ValueType::NUMBER) return LoxValue::Bool(l.numVal == r.numVal);
+            if (l.type == ValueType::STRING) return LoxValue::Bool(l.strVal == r.strVal);
+        }
+        if (op == "!=")
+        {
+            if (l.type != r.type) return LoxValue::Bool(true);
+            if (l.type == ValueType::NIL) return LoxValue::Bool(false);
+            if (l.type == ValueType::BOOL) return LoxValue::Bool(l.boolVal != r.boolVal);
+            if (l.type == ValueType::NUMBER) return LoxValue::Bool(l.numVal != r.numVal);
+            if (l.type == ValueType::STRING) return LoxValue::Bool(l.strVal != r.strVal);
+        }
+        return LoxValue::Nil();
     }
 };
 
@@ -478,8 +590,23 @@ int main(int argc, char *argv[])
             std::cout << expr->print() << std::endl;
         }
     }
-    else
+    else if (command == "evaluate")
     {
+        std::string file_contents = read_file_contents(argv[2]);
+        Scanner scanner(file_contents);
+        auto tokens = scanner.scanTokens();
+        if (scanner.hasError()) return 65;
+
+        Parser parser(tokens);
+        auto expr = parser.parse();
+        if (parser.hasError()) return 65;
+        if (expr)
+        {
+            LoxValue result = expr->evaluate();
+            std::cout << result.toString() << std::endl;
+        }
+    }
+    else
         std::cerr << "Unknown command: " << command << std::endl;
         return 1;
     }
