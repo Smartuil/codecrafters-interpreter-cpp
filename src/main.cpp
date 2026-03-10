@@ -366,8 +366,9 @@ struct BinaryExpr : Expr
     std::unique_ptr<Expr> left;
     std::string op;
     std::unique_ptr<Expr> right;
-    BinaryExpr(std::unique_ptr<Expr> l, const std::string& op, std::unique_ptr<Expr> r)
-        : left(std::move(l)), op(op), right(std::move(r)) {}
+    int line;
+    BinaryExpr(std::unique_ptr<Expr> l, const std::string& op, std::unique_ptr<Expr> r, int line)
+        : left(std::move(l)), op(op), right(std::move(r)), line(line) {}
     std::string print() const override
     {
         return "(" + op + " " + left->print() + " " + right->print() + ")";
@@ -383,8 +384,18 @@ struct BinaryExpr : Expr
             return LoxValue::Number(l.numVal + r.numVal);
         }
         if (op == "-") return LoxValue::Number(l.numVal - r.numVal);
-        if (op == "*") return LoxValue::Number(l.numVal * r.numVal);
-        if (op == "/") return LoxValue::Number(l.numVal / r.numVal);
+        if (op == "*")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Number(l.numVal * r.numVal);
+        }
+        if (op == "/")
+        {
+            if (l.type != ValueType::NUMBER || r.type != ValueType::NUMBER)
+                throw RuntimeError("Operands must be numbers.", line);
+            return LoxValue::Number(l.numVal / r.numVal);
+        }
         if (op == ">") return LoxValue::Bool(l.numVal > r.numVal);
         if (op == ">=") return LoxValue::Bool(l.numVal >= r.numVal);
         if (op == "<") return LoxValue::Bool(l.numVal < r.numVal);
@@ -456,7 +467,7 @@ private:
         {
             Token op = advance();
             auto right = comparison();
-            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right), op.line);
         }
         return left;
     }
@@ -469,7 +480,7 @@ private:
         {
             Token op = advance();
             auto right = addition();
-            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right), op.line);
         }
         return left;
     }
@@ -481,7 +492,7 @@ private:
         {
             Token op = advance();
             auto right = multiplication();
-            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right), op.line);
         }
         return left;
     }
@@ -493,7 +504,7 @@ private:
         {
             Token op = advance();
             auto right = unary();
-            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right));
+            left = std::make_unique<BinaryExpr>(std::move(left), op.lexeme, std::move(right), op.line);
         }
         return left;
     }
