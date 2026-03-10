@@ -601,7 +601,33 @@ private:
 
     std::unique_ptr<Expr> expression()
     {
-        return equality();
+        return assignment();
+    }
+
+    std::unique_ptr<Expr> assignment()
+    {
+        auto expr = equality();
+
+        if (check(TokenType::EQUAL))
+        {
+            Token equals = advance();
+            auto value = assignment(); // 右结合，递归调用自身
+
+            // 检查左侧是否为变量
+            VariableExpr* varExpr = dynamic_cast<VariableExpr*>(expr.get());
+            if (varExpr)
+            {
+                std::string name = varExpr->name;
+                int line = varExpr->line;
+                return std::make_unique<AssignExpr>(name, std::move(value), line);
+            }
+
+            hasError_ = true;
+            std::cerr << "[line " << equals.line << "] Error at '=': Invalid assignment target." << std::endl;
+            return nullptr;
+        }
+
+        return expr;
     }
 
     std::unique_ptr<Expr> equality()
