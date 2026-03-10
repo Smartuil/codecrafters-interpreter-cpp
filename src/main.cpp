@@ -5,8 +5,16 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+struct RuntimeError : std::runtime_error
+{
+    int line;
+    RuntimeError(const std::string& msg, int line)
+        : std::runtime_error(msg), line(line) {}
+};
 
 // ============ Token ============
 
@@ -326,13 +334,19 @@ struct UnaryExpr : Expr
 {
     std::string op;
     std::unique_ptr<Expr> right;
-    UnaryExpr(const std::string& op, std::unique_ptr<Expr> r) : op(op), right(std::move(r)) {}
+    int line;
+    UnaryExpr(const std::string& op, std::unique_ptr<Expr> r, int line)
+        : op(op), right(std::move(r)), line(line) {}
     std::string print() const override { return "(" + op + " " + right->print() + ")"; }
     LoxValue evaluate() const override
     {
         LoxValue val = right->evaluate();
         if (op == "-")
         {
+            if (val.type != ValueType::NUMBER)
+            {
+                throw RuntimeError("Operand must be a number.", line);
+            }
             return LoxValue::Number(-val.numVal);
         }
         if (op == "!")
@@ -490,7 +504,7 @@ private:
         {
             Token op = advance();
             auto right = unary();
-            return std::make_unique<UnaryExpr>(op.lexeme, std::move(right));
+            return std::make_unique<UnaryExpr>(op.lexeme, std::move(right), op.line);
         }
         return primary();
     }
@@ -602,8 +616,17 @@ int main(int argc, char *argv[])
         if (parser.hasError()) return 65;
         if (expr)
         {
-            LoxValue result = expr->evaluate();
-            std::cout << result.toString() << std::endl;
+            try
+            {
+                LoxValue result = expr->evaluate();
+                std::cout << result.toString() << std::endl;
+            }
+            catch (const RuntimeError& e)
+            {
+                std::cerr << e.what() << std::endl;
+                std::cerr << "[line " << e.line << "]" << std::endl;
+                return 70;
+            }
         }
     }
     else
