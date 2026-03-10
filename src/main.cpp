@@ -298,24 +298,19 @@ struct Expr
 struct LiteralExpr : Expr
 {
     std::string value;
-    LiteralExpr(const std::string& v) : value(v) {}
+    ValueType litType;
+    LiteralExpr(const std::string& v, ValueType t = ValueType::NIL) : value(v), litType(t) {}
     std::string print() const override { return value; }
     LoxValue evaluate() const override
     {
-        if (value == "nil") return LoxValue::Nil();
-        if (value == "true") return LoxValue::Bool(true);
-        if (value == "false") return LoxValue::Bool(false);
-        // Try number
-        try
+        switch (litType)
         {
-            double d = std::stod(value);
-            return LoxValue::Number(d);
+            case ValueType::NIL: return LoxValue::Nil();
+            case ValueType::BOOL: return LoxValue::Bool(value == "true");
+            case ValueType::NUMBER: return LoxValue::Number(std::stod(value));
+            case ValueType::STRING: return LoxValue::String(value);
         }
-        catch (...)
-        {
-            // It's a string
-            return LoxValue::String(value);
-        }
+        return LoxValue::Nil();
     }
 };
 
@@ -505,27 +500,27 @@ private:
         if (check(TokenType::TRUE))
         {
             advance();
-            return std::make_unique<LiteralExpr>("true");
+            return std::make_unique<LiteralExpr>("true", ValueType::BOOL);
         }
         if (check(TokenType::FALSE))
         {
             advance();
-            return std::make_unique<LiteralExpr>("false");
+            return std::make_unique<LiteralExpr>("false", ValueType::BOOL);
         }
         if (check(TokenType::NIL))
         {
             advance();
-            return std::make_unique<LiteralExpr>("nil");
+            return std::make_unique<LiteralExpr>("nil", ValueType::NIL);
         }
         if (check(TokenType::NUMBER))
         {
             Token tok = advance();
-            return std::make_unique<LiteralExpr>(tok.literal);
+            return std::make_unique<LiteralExpr>(tok.literal, ValueType::NUMBER);
         }
         if (check(TokenType::STRING))
         {
             Token tok = advance();
-            return std::make_unique<LiteralExpr>(tok.literal);
+            return std::make_unique<LiteralExpr>(tok.literal, ValueType::STRING);
         }
 
         if (check(TokenType::LEFT_PAREN))
