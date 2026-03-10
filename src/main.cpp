@@ -313,6 +313,17 @@ public:
         throw RuntimeError("Undefined variable '" + name + "'.", line);
     }
 
+    void assign(const std::string& name, const LoxValue& value, int line)
+    {
+        auto it = values_.find(name);
+        if (it != values_.end())
+        {
+            it->second = value;
+            return;
+        }
+        throw RuntimeError("Undefined variable '" + name + "'.", line);
+    }
+
 private:
     std::map<std::string, LoxValue> values_;
 };
@@ -477,6 +488,22 @@ struct VariableExpr : Expr
     LoxValue evaluate(Environment& env) const override
     {
         return env.get(name, line);
+    }
+};
+
+struct AssignExpr : Expr
+{
+    std::string name;
+    std::unique_ptr<Expr> value;
+    int line;
+    AssignExpr(const std::string& name, std::unique_ptr<Expr> value, int line)
+        : name(name), value(std::move(value)), line(line) {}
+    std::string print() const override { return "(= " + name + " " + value->print() + ")"; }
+    LoxValue evaluate(Environment& env) const override
+    {
+        LoxValue val = value->evaluate(env);
+        env.assign(name, val, line);
+        return val;
     }
 };
 
