@@ -447,6 +447,35 @@ struct BinaryExpr : Expr
     }
 };
 
+// ============ Statements ============
+
+struct Stmt
+{
+    virtual ~Stmt() = default;
+    virtual void execute() const = 0;
+};
+
+struct PrintStmt : Stmt
+{
+    std::unique_ptr<Expr> expr;
+    PrintStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
+    void execute() const override
+    {
+        LoxValue val = expr->evaluate();
+        std::cout << val.toString() << std::endl;
+    }
+};
+
+struct ExpressionStmt : Stmt
+{
+    std::unique_ptr<Expr> expr;
+    ExpressionStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
+    void execute() const override
+    {
+        expr->evaluate();
+    }
+};
+
 // ============ Parser ============
 
 class Parser
@@ -457,6 +486,17 @@ public:
     std::unique_ptr<Expr> parse()
     {
         return expression();
+    }
+
+    std::vector<std::unique_ptr<Stmt>> parseStatements()
+    {
+        std::vector<std::unique_ptr<Stmt>> stmts;
+        while (!isAtEnd())
+        {
+            auto s = statement();
+            if (s) stmts.push_back(std::move(s));
+        }
+        return stmts;
     }
 
     bool hasError() const { return hasError_; }
@@ -593,6 +633,42 @@ private:
         std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect expression." << std::endl;
         return nullptr;
     }
+
+    std::unique_ptr<Stmt> statement()
+    {
+        if (check(TokenType::PRINT))
+        {
+            advance();
+            return printStatement();
+        }
+        return expressionStatement();
+    }
+
+    std::unique_ptr<Stmt> printStatement()
+    {
+        auto expr = expression();
+        if (!check(TokenType::SEMICOLON))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after value." << std::endl;
+            return nullptr;
+        }
+        advance();
+        return std::make_unique<PrintStmt>(std::move(expr));
+    }
+
+    std::unique_ptr<Stmt> expressionStatement()
+    {
+        auto expr = expression();
+        if (!check(TokenType::SEMICOLON))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after expression." << std::endl;
+            return nullptr;
+        }
+        advance();
+        return std::make_unique<ExpressionStmt>(std::move(expr));
+    }
 };
 
 // ============ Helpers ============
@@ -665,6 +741,31 @@ int main(int argc, char *argv[])
                 std::cerr << "[line " << e.line << "]" << std::endl;
                 return 70;
             }
+        }
+    }
+    else if (command == "run")
+    {
+        std::string file_contents = read_file_contents(argv[2]);
+        Scanner scanner(file_contents);
+        auto tokens = scanner.scanTokens();
+        if (scanner.hasError()) return 65;
+
+        Parser parser(tokens);
+        auto stmts = parser.parseStatements();
+        if (parser.hasError()) return 65;
+
+        try
+        {
+            for (const auto& stmt : stmts)
+            {
+                stmt->execute();
+            }
+        }
+        catch (const RuntimeError& e)
+        {
+            std::cerr << e.what() << std::endl;
+            std::cerr << "[line " << e.line << "]" << std::endl;
+            return 70;
         }
     }
     else
