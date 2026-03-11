@@ -517,6 +517,34 @@ struct AssignExpr : Expr
     }
 };
 
+static bool isTruthy(const LoxValue& val);
+
+struct LogicalExpr : Expr
+{
+    std::unique_ptr<Expr> left;
+    std::string op;
+    std::unique_ptr<Expr> right;
+    LogicalExpr(std::unique_ptr<Expr> l, const std::string& op, std::unique_ptr<Expr> r)
+        : left(std::move(l)), op(op), right(std::move(r)) {}
+    std::string print() const override
+    {
+        return "(" + op + " " + left->print() + " " + right->print() + ")";
+    }
+    LoxValue evaluate(Environment& env) const override
+    {
+        LoxValue l = left->evaluate(env);
+        if (op == "or")
+        {
+            if (isTruthy(l)) return l;
+        }
+        else
+        {
+            if (!isTruthy(l)) return l;
+        }
+        return right->evaluate(env);
+    }
+};
+
 // ============ Statements ============
 
 struct Stmt
@@ -659,7 +687,7 @@ private:
 
     std::unique_ptr<Expr> assignment()
     {
-        auto expr = equality();
+        auto expr = orExpression();
 
         if (check(TokenType::EQUAL))
         {
@@ -680,6 +708,18 @@ private:
             return nullptr;
         }
 
+        return expr;
+    }
+
+    std::unique_ptr<Expr> orExpression()
+    {
+        auto expr = equality();
+        while (check(TokenType::OR))
+        {
+            Token op = advance();
+            auto right = equality();
+            expr = std::make_unique<LogicalExpr>(std::move(expr), op.lexeme, std::move(right));
+        }
         return expr;
     }
 
