@@ -901,6 +901,11 @@ private:
 
     std::unique_ptr<Stmt> statement()
     {
+        if (check(TokenType::FOR))
+        {
+            advance();
+            return forStatement();
+        }
         if (check(TokenType::IF))
         {
             advance();
@@ -922,6 +927,92 @@ private:
             return printStatement();
         }
         return expressionStatement();
+    }
+
+    std::unique_ptr<Stmt> forStatement()
+    {
+        if (!check(TokenType::LEFT_PAREN))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect '(' after 'for'." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        // Initializer
+        std::unique_ptr<Stmt> initializer;
+        if (check(TokenType::SEMICOLON))
+        {
+            advance();
+            initializer = nullptr;
+        }
+        else if (check(TokenType::VAR))
+        {
+            advance();
+            initializer = varDeclaration();
+        }
+        else
+        {
+            initializer = expressionStatement();
+        }
+
+        // Condition
+        std::unique_ptr<Expr> condition = nullptr;
+        if (!check(TokenType::SEMICOLON))
+        {
+            condition = expression();
+        }
+        if (!check(TokenType::SEMICOLON))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after loop condition." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        // Increment
+        std::unique_ptr<Expr> increment = nullptr;
+        if (!check(TokenType::RIGHT_PAREN))
+        {
+            increment = expression();
+        }
+        if (!check(TokenType::RIGHT_PAREN))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after for clauses." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        // Body
+        auto body = statement();
+
+        // Desugar: attach increment after body
+        if (increment)
+        {
+            std::vector<std::unique_ptr<Stmt>> stmts;
+            stmts.push_back(std::move(body));
+            stmts.push_back(std::make_unique<ExpressionStmt>(std::move(increment)));
+            body = std::make_unique<BlockStmt>(std::move(stmts));
+        }
+
+        // Desugar: wrap in while
+        if (!condition)
+        {
+            condition = std::make_unique<LiteralExpr>("true", ValueType::BOOL);
+        }
+        body = std::make_unique<WhileStmt>(std::move(condition), std::move(body));
+
+        // Desugar: wrap with initializer
+        if (initializer)
+        {
+            std::vector<std::unique_ptr<Stmt>> stmts;
+            stmts.push_back(std::move(initializer));
+            stmts.push_back(std::move(body));
+            body = std::make_unique<BlockStmt>(std::move(stmts));
+        }
+
+        return body;
     }
 
     std::unique_ptr<Stmt> whileStatement()
