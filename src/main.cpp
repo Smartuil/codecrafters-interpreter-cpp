@@ -634,6 +634,21 @@ struct IfStmt : Stmt
     }
 };
 
+struct WhileStmt : Stmt
+{
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<Stmt> body;
+    WhileStmt(std::unique_ptr<Expr> cond, std::unique_ptr<Stmt> body)
+        : condition(std::move(cond)), body(std::move(body)) {}
+    void execute(Environment& env) const override
+    {
+        while (isTruthy(condition->evaluate(env)))
+        {
+            body->execute(env);
+        }
+    }
+};
+
 // ============ Parser ============
 
 class Parser
@@ -891,6 +906,11 @@ private:
             advance();
             return ifStatement();
         }
+        if (check(TokenType::WHILE))
+        {
+            advance();
+            return whileStatement();
+        }
         if (check(TokenType::LEFT_BRACE))
         {
             advance();
@@ -902,6 +922,30 @@ private:
             return printStatement();
         }
         return expressionStatement();
+    }
+
+    std::unique_ptr<Stmt> whileStatement()
+    {
+        if (!check(TokenType::LEFT_PAREN))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect '(' after 'while'." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        auto condition = expression();
+
+        if (!check(TokenType::RIGHT_PAREN))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after condition." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        auto body = statement();
+        return std::make_unique<WhileStmt>(std::move(condition), std::move(body));
     }
 
     std::unique_ptr<Stmt> ifStatement()
