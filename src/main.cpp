@@ -578,6 +578,34 @@ struct BlockStmt : Stmt
     }
 };
 
+static bool isTruthy(const LoxValue& val)
+{
+    if (val.type == ValueType::NIL) return false;
+    if (val.type == ValueType::BOOL) return val.boolVal;
+    return true;
+}
+
+struct IfStmt : Stmt
+{
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<Stmt> thenBranch;
+    std::unique_ptr<Stmt> elseBranch;
+    IfStmt(std::unique_ptr<Expr> cond, std::unique_ptr<Stmt> thenBr, std::unique_ptr<Stmt> elseBr)
+        : condition(std::move(cond)), thenBranch(std::move(thenBr)), elseBranch(std::move(elseBr)) {}
+    void execute(Environment& env) const override
+    {
+        LoxValue val = condition->evaluate(env);
+        if (isTruthy(val))
+        {
+            thenBranch->execute(env);
+        }
+        else if (elseBranch)
+        {
+            elseBranch->execute(env);
+        }
+    }
+};
+
 // ============ Parser ============
 
 class Parser
@@ -806,6 +834,11 @@ private:
 
     std::unique_ptr<Stmt> statement()
     {
+        if (check(TokenType::IF))
+        {
+            advance();
+            return ifStatement();
+        }
         if (check(TokenType::LEFT_BRACE))
         {
             advance();
@@ -817,6 +850,37 @@ private:
             return printStatement();
         }
         return expressionStatement();
+    }
+
+    std::unique_ptr<Stmt> ifStatement()
+    {
+        if (!check(TokenType::LEFT_PAREN))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect '(' after 'if'." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        auto condition = expression();
+
+        if (!check(TokenType::RIGHT_PAREN))
+        {
+            hasError_ = true;
+            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after if condition." << std::endl;
+            return nullptr;
+        }
+        advance();
+
+        auto thenBranch = statement();
+        std::unique_ptr<Stmt> elseBranch = nullptr;
+        if (check(TokenType::ELSE))
+        {
+            advance();
+            elseBranch = statement();
+        }
+
+        return std::make_unique<IfStmt>(std::move(condition), std::move(thenBranch), std::move(elseBranch));
     }
 
     std::unique_ptr<Stmt> blockStatement()
