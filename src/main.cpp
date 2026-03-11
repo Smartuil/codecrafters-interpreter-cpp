@@ -713,8 +713,20 @@ private:
 
     std::unique_ptr<Expr> orExpression()
     {
-        auto expr = equality();
+        auto expr = andExpression();
         while (check(TokenType::OR))
+        {
+            Token op = advance();
+            auto right = andExpression();
+            expr = std::make_unique<LogicalExpr>(std::move(expr), op.lexeme, std::move(right));
+        }
+        return expr;
+    }
+
+    std::unique_ptr<Expr> andExpression()
+    {
+        auto expr = equality();
+        while (check(TokenType::AND))
         {
             Token op = advance();
             auto right = equality();
