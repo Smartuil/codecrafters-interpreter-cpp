@@ -16,6 +16,11 @@ struct RuntimeError : std::runtime_error
         : std::runtime_error(msg), line(line) {}
 };
 
+struct ParseError : std::runtime_error
+{
+    ParseError() : std::runtime_error("parse error") {}
+};
+
 // ============ Token ============
 
 enum class TokenType
@@ -695,6 +700,20 @@ private:
         return peek().type == type;
     }
 
+    ParseError error(const Token& token, const std::string& message)
+    {
+        hasError_ = true;
+        if (token.type == TokenType::EOF_TOKEN)
+        {
+            std::cerr << "[line " << token.line << "] Error at end: " << message << std::endl;
+        }
+        else
+        {
+            std::cerr << "[line " << token.line << "] Error at '" << token.lexeme << "': " << message << std::endl;
+        }
+        return ParseError();
+    }
+
     std::unique_ptr<Expr> expression()
     {
         return assignment();
@@ -718,8 +737,7 @@ private:
                 return std::make_unique<AssignExpr>(name, std::move(value), line);
             }
 
-            hasError_ = true;
-            std::cerr << "[line " << equals.line << "] Error at '=': Invalid assignment target." << std::endl;
+            error(equals, "Invalid assignment target.");
             return nullptr;
         }
 
@@ -849,36 +867,61 @@ private:
             auto expr = expression();
             if (!check(TokenType::RIGHT_PAREN))
             {
-                hasError_ = true;
-                std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after expression." << std::endl;
-                return nullptr;
+                throw error(peek(), "Expect ')' after expression.");
             }
             advance();
             return std::make_unique<GroupExpr>(std::move(expr));
         }
 
-        hasError_ = true;
-        std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect expression." << std::endl;
-        return nullptr;
+        throw error(peek(), "Expect expression.");
+    }
+
+    void synchronize()
+    {
+        while (!isAtEnd())
+        {
+            if (previous().type == TokenType::SEMICOLON) return;
+            switch (peek().type)
+            {
+                case TokenType::CLASS:
+                case TokenType::FUN:
+                case TokenType::VAR:
+                case TokenType::FOR:
+                case TokenType::IF:
+                case TokenType::WHILE:
+                case TokenType::PRINT:
+                case TokenType::RETURN:
+                    return;
+                default:
+                    break;
+            }
+            advance();
+        }
     }
 
     std::unique_ptr<Stmt> declaration()
     {
-        if (check(TokenType::VAR))
+        try
         {
-            advance();
-            return varDeclaration();
+            if (check(TokenType::VAR))
+            {
+                advance();
+                return varDeclaration();
+            }
+            return statement();
         }
-        return statement();
+        catch (const std::runtime_error&)
+        {
+            synchronize();
+            return nullptr;
+        }
     }
 
     std::unique_ptr<Stmt> varDeclaration()
     {
         if (!check(TokenType::IDENTIFIER))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect variable name." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect variable name.");
         }
         Token name = advance();
 
@@ -891,9 +934,7 @@ private:
 
         if (!check(TokenType::SEMICOLON))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after variable declaration." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ';' after variable declaration.");
         }
         advance();
         return std::make_unique<VarStmt>(name.lexeme, std::move(initializer));
@@ -933,9 +974,7 @@ private:
     {
         if (!check(TokenType::LEFT_PAREN))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect '(' after 'for'." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect '(' after 'for'.");
         }
         advance();
 
@@ -964,9 +1003,7 @@ private:
         }
         if (!check(TokenType::SEMICOLON))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after loop condition." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ';' after loop condition.");
         }
         advance();
 
@@ -978,9 +1015,7 @@ private:
         }
         if (!check(TokenType::RIGHT_PAREN))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after for clauses." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ')' after for clauses.");
         }
         advance();
 
@@ -1019,9 +1054,7 @@ private:
     {
         if (!check(TokenType::LEFT_PAREN))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect '(' after 'while'." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect '(' after 'while'.");
         }
         advance();
 
@@ -1029,9 +1062,7 @@ private:
 
         if (!check(TokenType::RIGHT_PAREN))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after condition." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ')' after condition.");
         }
         advance();
 
@@ -1043,9 +1074,7 @@ private:
     {
         if (!check(TokenType::LEFT_PAREN))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect '(' after 'if'." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect '(' after 'if'.");
         }
         advance();
 
@@ -1053,9 +1082,7 @@ private:
 
         if (!check(TokenType::RIGHT_PAREN))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ')' after if condition." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ')' after if condition.");
         }
         advance();
 
@@ -1080,9 +1107,7 @@ private:
         }
         if (!check(TokenType::RIGHT_BRACE))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at end: Expect '}' ." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect '}' .");
         }
         advance();
         return std::make_unique<BlockStmt>(std::move(stmts));
@@ -1093,9 +1118,7 @@ private:
         auto expr = expression();
         if (!check(TokenType::SEMICOLON))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after value." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ';' after value.");
         }
         advance();
         return std::make_unique<PrintStmt>(std::move(expr));
@@ -1106,9 +1129,7 @@ private:
         auto expr = expression();
         if (!check(TokenType::SEMICOLON))
         {
-            hasError_ = true;
-            std::cerr << "[line " << peek().line << "] Error at '" << peek().lexeme << "': Expect ';' after expression." << std::endl;
-            return nullptr;
+            throw error(peek(), "Expect ';' after expression.");
         }
         advance();
         return std::make_unique<ExpressionStmt>(std::move(expr));
