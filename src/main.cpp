@@ -1176,7 +1176,15 @@ int main(int argc, char *argv[])
         if (scanner.hasError()) return 65;
 
         Parser parser(tokens);
-        auto expr = parser.parse();
+        std::unique_ptr<Expr> expr;
+        try
+        {
+            expr = parser.parse();
+        }
+        catch (const ParseError&)
+        {
+            // error already reported
+        }
         if (parser.hasError()) return 65;
         if (expr)
         {
@@ -1191,7 +1199,15 @@ int main(int argc, char *argv[])
         if (scanner.hasError()) return 65;
 
         Parser parser(tokens);
-        auto expr = parser.parse();
+        std::unique_ptr<Expr> expr;
+        try
+        {
+            expr = parser.parse();
+        }
+        catch (const ParseError&)
+        {
+            // error already reported
+        }
         if (parser.hasError()) return 65;
         if (expr)
         {
