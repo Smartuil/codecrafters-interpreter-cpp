@@ -23,6 +23,11 @@ struct ParseError : std::runtime_error
     ParseError() : std::runtime_error("parse error") {}
 };
 
+struct ReturnValue
+{
+    LoxValue value;
+};
+
 // ============ Token ============
 
 enum class TokenType
@@ -728,6 +733,23 @@ struct WhileStmt : Stmt
     }
 };
 
+struct ReturnStmt : Stmt
+{
+    Token keyword;
+    std::unique_ptr<Expr> value;
+    ReturnStmt(Token keyword, std::unique_ptr<Expr> value)
+        : keyword(keyword), value(std::move(value)) {}
+    void execute(Environment& env) const override
+    {
+        LoxValue val = LoxValue::Nil();
+        if (value)
+        {
+            val = value->evaluate(env);
+        }
+        throw ReturnValue{val};
+    }
+};
+
 struct FunctionStmt : Stmt
 {
     Token name;
@@ -755,9 +777,16 @@ struct LoxFunction : LoxCallable
         {
             funcEnv.define(declaration->params[i].lexeme, args[i]);
         }
-        for (const auto& stmt : declaration->body)
+        try
         {
-            stmt->execute(funcEnv);
+            for (const auto& stmt : declaration->body)
+            {
+                stmt->execute(funcEnv);
+            }
+        }
+        catch (const ReturnValue& ret)
+        {
+            return ret.value;
         }
         return LoxValue::Nil();
     }
@@ -1168,6 +1197,10 @@ private:
             advance();
             return ifStatement();
         }
+        if (check(TokenType::RETURN))
+        {
+            return returnStatement();
+        }
         if (check(TokenType::WHILE))
         {
             advance();
@@ -1349,6 +1382,22 @@ private:
         }
         advance();
         return std::make_unique<ExpressionStmt>(std::move(expr));
+    }
+
+    std::unique_ptr<Stmt> returnStatement()
+    {
+        Token keyword = advance(); // consume 'return'
+        std::unique_ptr<Expr> value = nullptr;
+        if (!check(TokenType::SEMICOLON))
+        {
+            value = expression();
+        }
+        if (!check(TokenType::SEMICOLON))
+        {
+            throw error(peek(), "Expect ';' after return value.");
+        }
+        advance();
+        return std::make_unique<ReturnStmt>(keyword, std::move(value));
     }
 };
 
