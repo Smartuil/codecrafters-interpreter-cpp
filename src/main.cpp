@@ -728,6 +728,47 @@ struct WhileStmt : Stmt
     }
 };
 
+struct FunctionStmt : Stmt
+{
+    Token name;
+    std::vector<Token> params;
+    std::vector<std::unique_ptr<Stmt>> body;
+    FunctionStmt(Token name, std::vector<Token> params, std::vector<std::unique_ptr<Stmt>> body)
+        : name(name), params(std::move(params)), body(std::move(body)) {}
+    void execute(Environment& env) const override;
+};
+
+// ============ LoxFunction ============
+
+struct LoxFunction : LoxCallable
+{
+    const FunctionStmt* declaration;
+    Environment* closure;
+    LoxFunction(const FunctionStmt* decl, Environment* closure)
+        : declaration(decl), closure(closure) {}
+    int arity() const override { return static_cast<int>(declaration->params.size()); }
+    std::string name() const override { return declaration->name.lexeme; }
+    LoxValue call(const std::vector<LoxValue>& args) const override
+    {
+        Environment funcEnv(closure);
+        for (size_t i = 0; i < declaration->params.size(); i++)
+        {
+            funcEnv.define(declaration->params[i].lexeme, args[i]);
+        }
+        for (const auto& stmt : declaration->body)
+        {
+            stmt->execute(funcEnv);
+        }
+        return LoxValue::Nil();
+    }
+};
+
+void FunctionStmt::execute(Environment& env) const
+{
+    auto function = std::make_shared<LoxFunction>(this, &env);
+    env.define(name.lexeme, LoxValue::Callable(function));
+}
+
 // ============ Parser ============
 
 class Parser
@@ -1014,6 +1055,11 @@ private:
     {
         try
         {
+            if (check(TokenType::FUN))
+            {
+                advance();
+                return funDeclaration();
+            }
             if (check(TokenType::VAR))
             {
                 advance();
@@ -1026,6 +1072,65 @@ private:
             synchronize();
             return nullptr;
         }
+    }
+
+    std::unique_ptr<Stmt> funDeclaration()
+    {
+        if (!check(TokenType::IDENTIFIER))
+        {
+            throw error(peek(), "Expect function name.");
+        }
+        Token name = advance();
+
+        if (!check(TokenType::LEFT_PAREN))
+        {
+            throw error(peek(), "Expect '(' after function name.");
+        }
+        advance();
+
+        std::vector<Token> params;
+        if (!check(TokenType::RIGHT_PAREN))
+        {
+            do
+            {
+                if (params.size() >= 255)
+                {
+                    error(peek(), "Can't have more than 255 parameters.");
+                }
+                if (!check(TokenType::IDENTIFIER))
+                {
+                    throw error(peek(), "Expect parameter name.");
+                }
+                params.push_back(advance());
+            } while (check(TokenType::COMMA) && (advance(), true));
+        }
+
+        if (!check(TokenType::RIGHT_PAREN))
+        {
+            throw error(peek(), "Expect ')' after parameters.");
+        }
+        advance();
+
+        if (!check(TokenType::LEFT_BRACE))
+        {
+            throw error(peek(), "Expect '{' before function body.");
+        }
+        advance();
+
+        // 复用 blockStatement 的内部逻辑来解析函数体
+        std::vector<std::unique_ptr<Stmt>> body;
+        while (!check(TokenType::RIGHT_BRACE) && !isAtEnd())
+        {
+            auto s = declaration();
+            if (s) body.push_back(std::move(s));
+        }
+        if (!check(TokenType::RIGHT_BRACE))
+        {
+            throw error(peek(), "Expect '}' after function body.");
+        }
+        advance();
+
+        return std::make_unique<FunctionStmt>(name, std::move(params), std::move(body));
     }
 
     std::unique_ptr<Stmt> varDeclaration()
