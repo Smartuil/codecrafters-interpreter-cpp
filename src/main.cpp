@@ -1,5 +1,7 @@
+#include <chrono>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -255,7 +257,15 @@ private:
 
 // ============ AST ============
 
-enum class ValueType { NIL, BOOL, NUMBER, STRING };
+enum class ValueType { NIL, BOOL, NUMBER, STRING, CALLABLE };
+
+struct LoxCallable
+{
+    virtual ~LoxCallable() = default;
+    virtual int arity() const = 0;
+    virtual LoxValue call(const std::vector<LoxValue>& args) const = 0;
+    virtual std::string name() const = 0;
+};
 
 struct LoxValue
 {
@@ -263,11 +273,13 @@ struct LoxValue
     bool boolVal = false;
     double numVal = 0.0;
     std::string strVal;
+    std::shared_ptr<LoxCallable> callableVal;
 
     static LoxValue Nil() { return {ValueType::NIL}; }
-    static LoxValue Bool(bool b) { return {ValueType::BOOL, b, 0.0, ""}; }
-    static LoxValue Number(double n) { return {ValueType::NUMBER, false, n, ""}; }
-    static LoxValue String(const std::string& s) { return {ValueType::STRING, false, 0.0, s}; }
+    static LoxValue Bool(bool b) { return {ValueType::BOOL, b, 0.0, "", nullptr}; }
+    static LoxValue Number(double n) { return {ValueType::NUMBER, false, n, "", nullptr}; }
+    static LoxValue String(const std::string& s) { return {ValueType::STRING, false, 0.0, s, nullptr}; }
+    static LoxValue Callable(std::shared_ptr<LoxCallable> c) { return {ValueType::CALLABLE, false, 0.0, "", c}; }
 
     std::string toString() const
     {
@@ -296,6 +308,7 @@ struct LoxValue
                 return s;
             }
             case ValueType::STRING: return strVal;
+            case ValueType::CALLABLE: return "<fn " + callableVal->name() + ">";
         }
         return "nil";
     }
@@ -547,6 +560,65 @@ struct LogicalExpr : Expr
             if (!isTruthy(l)) return l;
         }
         return right->evaluate(env);
+    }
+};
+
+// ============ Native Functions ============
+
+struct ClockNative : LoxCallable
+{
+    int arity() const override { return 0; }
+    std::string name() const override { return "clock"; }
+    LoxValue call(const std::vector<LoxValue>& args) const override
+    {
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        double seconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() / 1000.0;
+        return LoxValue::Number(seconds);
+    }
+};
+
+// ============ Call Expression ============
+
+struct CallExpr : Expr
+{
+    std::unique_ptr<Expr> callee;
+    Token paren;
+    std::vector<std::unique_ptr<Expr>> arguments;
+    CallExpr(std::unique_ptr<Expr> callee, Token paren, std::vector<std::unique_ptr<Expr>> args)
+        : callee(std::move(callee)), paren(paren), arguments(std::move(args)) {}
+    std::string print() const override
+    {
+        // Not typically used for parse output, but provide something reasonable
+        std::string result = callee->print() + "(";
+        for (size_t i = 0; i < arguments.size(); i++)
+        {
+            if (i > 0) result += ", ";
+            result += arguments[i]->print();
+        }
+        result += ")";
+        return result;
+    }
+    LoxValue evaluate(Environment& env) const override
+    {
+        LoxValue calleeVal = callee->evaluate(env);
+        if (calleeVal.type != ValueType::CALLABLE || !calleeVal.callableVal)
+        {
+            throw RuntimeError("Can only call functions and classes.", paren.line);
+        }
+        std::vector<LoxValue> args;
+        for (const auto& arg : arguments)
+        {
+            args.push_back(arg->evaluate(env));
+        }
+        if (static_cast<int>(args.size()) != calleeVal.callableVal->arity())
+        {
+            throw RuntimeError(
+                "Expected " + std::to_string(calleeVal.callableVal->arity()) +
+                " arguments but got " + std::to_string(args.size()) + ".",
+                paren.line);
+        }
+        return calleeVal.callableVal->call(args);
     }
 };
 
@@ -825,7 +897,44 @@ private:
             auto right = unary();
             return std::make_unique<UnaryExpr>(op.lexeme, std::move(right), op.line);
         }
-        return primary();
+        return call();
+    }
+
+    std::unique_ptr<Expr> call()
+    {
+        auto expr = primary();
+
+        while (true)
+        {
+            if (check(TokenType::LEFT_PAREN))
+            {
+                Token paren = advance();
+                std::vector<std::unique_ptr<Expr>> arguments;
+                if (!check(TokenType::RIGHT_PAREN))
+                {
+                    do
+                    {
+                        if (arguments.size() >= 255)
+                        {
+                            error(peek(), "Can't have more than 255 arguments.");
+                        }
+                        arguments.push_back(expression());
+                    } while (check(TokenType::COMMA) && (advance(), true));
+                }
+                if (!check(TokenType::RIGHT_PAREN))
+                {
+                    throw error(peek(), "Expect ')' after arguments.");
+                }
+                Token closeParen = advance();
+                expr = std::make_unique<CallExpr>(std::move(expr), closeParen, std::move(arguments));
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return expr;
     }
 
     std::unique_ptr<Expr> primary()
@@ -1239,6 +1348,7 @@ int main(int argc, char *argv[])
         try
         {
             Environment env;
+            env.define("clock", LoxValue::Callable(std::make_shared<ClockNative>()));
             for (const auto& stmt : stmts)
             {
                 stmt->execute(env);
