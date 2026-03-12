@@ -23,11 +23,6 @@ struct ParseError : std::runtime_error
     ParseError() : std::runtime_error("parse error") {}
 };
 
-struct ReturnValue
-{
-    LoxValue value;
-};
-
 // ============ Token ============
 
 enum class TokenType
@@ -319,6 +314,11 @@ struct LoxValue
         }
         return "nil";
     }
+};
+
+struct ReturnValue
+{
+    LoxValue value;
 };
 
 // ============ Environment ============
