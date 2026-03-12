@@ -323,11 +323,11 @@ struct ReturnValue
 
 // ============ Environment ============
 
-class Environment
+class Environment : public std::enable_shared_from_this<Environment>
 {
 public:
     Environment() : enclosing_(nullptr) {}
-    Environment(Environment* enclosing) : enclosing_(enclosing) {}
+    Environment(std::shared_ptr<Environment> enclosing) : enclosing_(enclosing) {}
 
     void define(const std::string& name, const LoxValue& value)
     {
@@ -359,7 +359,7 @@ public:
     }
 
 private:
-    Environment* enclosing_;
+    std::shared_ptr<Environment> enclosing_;
     std::map<std::string, LoxValue> values_;
 };
 
@@ -367,7 +367,7 @@ struct Expr
 {
     virtual ~Expr() = default;
     virtual std::string print() const = 0;
-    virtual LoxValue evaluate(Environment& env) const = 0;
+    virtual LoxValue evaluate(std::shared_ptr<Environment> env) const = 0;
 };
 
 struct LiteralExpr : Expr
@@ -376,7 +376,7 @@ struct LiteralExpr : Expr
     ValueType litType;
     LiteralExpr(const std::string& v, ValueType t = ValueType::NIL) : value(v), litType(t) {}
     std::string print() const override { return value; }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         switch (litType)
         {
@@ -394,7 +394,7 @@ struct GroupExpr : Expr
     std::unique_ptr<Expr> expr;
     GroupExpr(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
     std::string print() const override { return "(group " + expr->print() + ")"; }
-    LoxValue evaluate(Environment& env) const override { return expr->evaluate(env); }
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override { return expr->evaluate(env); }
 };
 
 struct UnaryExpr : Expr
@@ -405,7 +405,7 @@ struct UnaryExpr : Expr
     UnaryExpr(const std::string& op, std::unique_ptr<Expr> r, int line)
         : op(op), right(std::move(r)), line(line) {}
     std::string print() const override { return "(" + op + " " + right->print() + ")"; }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         LoxValue val = right->evaluate(env);
         if (op == "-")
@@ -440,7 +440,7 @@ struct BinaryExpr : Expr
     {
         return "(" + op + " " + left->print() + " " + right->print() + ")";
     }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         LoxValue l = left->evaluate(env);
         LoxValue r = right->evaluate(env);
@@ -520,9 +520,9 @@ struct VariableExpr : Expr
     int line;
     VariableExpr(const std::string& name, int line) : name(name), line(line) {}
     std::string print() const override { return name; }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
-        return env.get(name, line);
+        return env->get(name, line);
     }
 };
 
@@ -534,10 +534,10 @@ struct AssignExpr : Expr
     AssignExpr(const std::string& name, std::unique_ptr<Expr> value, int line)
         : name(name), value(std::move(value)), line(line) {}
     std::string print() const override { return "(= " + name + " " + value->print() + ")"; }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         LoxValue val = value->evaluate(env);
-        env.assign(name, val, line);
+        env->assign(name, val, line);
         return val;
     }
 };
@@ -555,7 +555,7 @@ struct LogicalExpr : Expr
     {
         return "(" + op + " " + left->print() + " " + right->print() + ")";
     }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         LoxValue l = left->evaluate(env);
         if (op == "or")
@@ -606,7 +606,7 @@ struct CallExpr : Expr
         result += ")";
         return result;
     }
-    LoxValue evaluate(Environment& env) const override
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         LoxValue calleeVal = callee->evaluate(env);
         if (calleeVal.type != ValueType::CALLABLE || !calleeVal.callableVal)
@@ -634,14 +634,14 @@ struct CallExpr : Expr
 struct Stmt
 {
     virtual ~Stmt() = default;
-    virtual void execute(Environment& env) const = 0;
+    virtual void execute(std::shared_ptr<Environment> env) const = 0;
 };
 
 struct PrintStmt : Stmt
 {
     std::unique_ptr<Expr> expr;
     PrintStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
         LoxValue val = expr->evaluate(env);
         std::cout << val.toString() << std::endl;
@@ -652,7 +652,7 @@ struct ExpressionStmt : Stmt
 {
     std::unique_ptr<Expr> expr;
     ExpressionStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
         expr->evaluate(env);
     }
@@ -664,14 +664,14 @@ struct VarStmt : Stmt
     std::unique_ptr<Expr> initializer;
     VarStmt(const std::string& name, std::unique_ptr<Expr> init)
         : name(name), initializer(std::move(init)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
         LoxValue value = LoxValue::Nil();
         if (initializer)
         {
             value = initializer->evaluate(env);
         }
-        env.define(name, value);
+        env->define(name, value);
     }
 };
 
@@ -680,9 +680,9 @@ struct BlockStmt : Stmt
     std::vector<std::unique_ptr<Stmt>> statements;
     BlockStmt(std::vector<std::unique_ptr<Stmt>> stmts)
         : statements(std::move(stmts)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
-        Environment blockEnv(&env);
+        auto blockEnv = std::make_shared<Environment>(env);
         for (const auto& stmt : statements)
         {
             stmt->execute(blockEnv);
@@ -704,7 +704,7 @@ struct IfStmt : Stmt
     std::unique_ptr<Stmt> elseBranch;
     IfStmt(std::unique_ptr<Expr> cond, std::unique_ptr<Stmt> thenBr, std::unique_ptr<Stmt> elseBr)
         : condition(std::move(cond)), thenBranch(std::move(thenBr)), elseBranch(std::move(elseBr)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
         LoxValue val = condition->evaluate(env);
         if (isTruthy(val))
@@ -724,7 +724,7 @@ struct WhileStmt : Stmt
     std::unique_ptr<Stmt> body;
     WhileStmt(std::unique_ptr<Expr> cond, std::unique_ptr<Stmt> body)
         : condition(std::move(cond)), body(std::move(body)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
         while (isTruthy(condition->evaluate(env)))
         {
@@ -739,7 +739,7 @@ struct ReturnStmt : Stmt
     std::unique_ptr<Expr> value;
     ReturnStmt(Token keyword, std::unique_ptr<Expr> value)
         : keyword(keyword), value(std::move(value)) {}
-    void execute(Environment& env) const override
+    void execute(std::shared_ptr<Environment> env) const override
     {
         LoxValue val = LoxValue::Nil();
         if (value)
@@ -757,7 +757,7 @@ struct FunctionStmt : Stmt
     std::vector<std::unique_ptr<Stmt>> body;
     FunctionStmt(Token name, std::vector<Token> params, std::vector<std::unique_ptr<Stmt>> body)
         : name(name), params(std::move(params)), body(std::move(body)) {}
-    void execute(Environment& env) const override;
+    void execute(std::shared_ptr<Environment> env) const override;
 };
 
 // ============ LoxFunction ============
@@ -765,17 +765,17 @@ struct FunctionStmt : Stmt
 struct LoxFunction : LoxCallable
 {
     const FunctionStmt* declaration;
-    Environment* closure;
-    LoxFunction(const FunctionStmt* decl, Environment* closure)
+    std::shared_ptr<Environment> closure;
+    LoxFunction(const FunctionStmt* decl, std::shared_ptr<Environment> closure)
         : declaration(decl), closure(closure) {}
     int arity() const override { return static_cast<int>(declaration->params.size()); }
     std::string name() const override { return declaration->name.lexeme; }
     LoxValue call(const std::vector<LoxValue>& args) const override
     {
-        Environment funcEnv(closure);
+        auto funcEnv = std::make_shared<Environment>(closure);
         for (size_t i = 0; i < declaration->params.size(); i++)
         {
-            funcEnv.define(declaration->params[i].lexeme, args[i]);
+            funcEnv->define(declaration->params[i].lexeme, args[i]);
         }
         try
         {
@@ -792,10 +792,10 @@ struct LoxFunction : LoxCallable
     }
 };
 
-void FunctionStmt::execute(Environment& env) const
+void FunctionStmt::execute(std::shared_ptr<Environment> env) const
 {
-    auto function = std::make_shared<LoxFunction>(this, &env);
-    env.define(name.lexeme, LoxValue::Callable(function));
+    auto function = std::make_shared<LoxFunction>(this, env);
+    env->define(name.lexeme, LoxValue::Callable(function));
 }
 
 // ============ Parser ============
@@ -1478,7 +1478,7 @@ int main(int argc, char *argv[])
         {
             try
             {
-                Environment env;
+                auto env = std::make_shared<Environment>();
                 LoxValue result = expr->evaluate(env);
                 std::cout << result.toString() << std::endl;
             }
@@ -1503,8 +1503,8 @@ int main(int argc, char *argv[])
 
         try
         {
-            Environment env;
-            env.define("clock", LoxValue::Callable(std::make_shared<ClockNative>()));
+            auto env = std::make_shared<Environment>();
+            env->define("clock", LoxValue::Callable(std::make_shared<ClockNative>()));
             for (const auto& stmt : stmts)
             {
                 stmt->execute(env);
