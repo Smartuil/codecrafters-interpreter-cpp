@@ -259,6 +259,8 @@ private:
 
 enum class ValueType { NIL, BOOL, NUMBER, STRING, CALLABLE };
 
+struct LoxValue;
+
 struct LoxCallable
 {
     virtual ~LoxCallable() = default;
