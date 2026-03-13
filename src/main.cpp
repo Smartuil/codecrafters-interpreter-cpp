@@ -699,9 +699,10 @@ struct ExpressionStmt : Stmt
 struct VarStmt : Stmt
 {
     std::string name;
+    int line;
     std::unique_ptr<Expr> initializer;
-    VarStmt(const std::string& name, std::unique_ptr<Expr> init)
-        : name(name), initializer(std::move(init)) {}
+    VarStmt(const std::string& name, int line, std::unique_ptr<Expr> init)
+        : name(name), line(line), initializer(std::move(init)) {}
     void execute(std::shared_ptr<Environment> env) const override
     {
         LoxValue value = LoxValue::Nil();
@@ -1220,7 +1221,7 @@ private:
             throw error(peek(), "Expect ';' after variable declaration.");
         }
         advance();
-        return std::make_unique<VarStmt>(name.lexeme, std::move(initializer));
+        return std::make_unique<VarStmt>(name.lexeme, name.line, std::move(initializer));
     }
 
     std::unique_ptr<Stmt> statement()
@@ -1469,9 +1470,15 @@ private:
         scopes_.pop_back();
     }
 
-    void declare(const std::string& name)
+    void declare(const std::string& name, int line)
     {
         if (scopes_.empty()) return;
+        if (scopes_.back().find(name) != scopes_.back().end())
+        {
+            std::cerr << "[line " << line << "] Error at '" << name
+                      << "': Already a variable with this name in this scope." << std::endl;
+            hasError_ = true;
+        }
         scopes_.back()[name] = false;
     }
 
@@ -1526,7 +1533,7 @@ private:
         }
         else if (auto s = dynamic_cast<const VarStmt*>(stmt))
         {
-            declare(s->name);
+            declare(s->name, s->line);
             if (s->initializer)
             {
                 resolveExpr(s->initializer.get());
@@ -1552,7 +1559,7 @@ private:
         }
         else if (auto s = dynamic_cast<const FunctionStmt*>(stmt))
         {
-            declare(s->name.lexeme);
+            declare(s->name.lexeme, s->name.line);
             define(s->name.lexeme);
             resolveFunction(s);
         }
@@ -1567,7 +1574,7 @@ private:
         beginScope();
         for (const auto& param : func->params)
         {
-            declare(param.lexeme);
+            declare(param.lexeme, param.line);
             define(param.lexeme);
         }
         resolve(func->body);
