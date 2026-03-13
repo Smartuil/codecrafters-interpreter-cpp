@@ -276,8 +276,21 @@ struct LoxClass;
 struct LoxInstance
 {
     std::shared_ptr<LoxClass> klass;
+    std::map<std::string, LoxValue> fields;
     LoxInstance(std::shared_ptr<LoxClass> klass) : klass(klass) {}
     std::string toString() const;
+
+    LoxValue get(const std::string& name, int line) const
+    {
+        auto it = fields.find(name);
+        if (it != fields.end()) return it->second;
+        throw RuntimeError("Undefined property '" + name + "'.", line);
+    }
+
+    void set(const std::string& name, const LoxValue& value)
+    {
+        fields[name] = value;
+    }
 };
 
 struct LoxValue
@@ -681,6 +694,53 @@ struct CallExpr : Expr
     }
 };
 
+// ============ Get/Set Expressions ============
+
+struct GetExpr : Expr
+{
+    std::unique_ptr<Expr> object;
+    Token name;
+    GetExpr(std::unique_ptr<Expr> object, Token name)
+        : object(std::move(object)), name(name) {}
+    std::string print() const override
+    {
+        return object->print() + "." + name.lexeme;
+    }
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
+    {
+        LoxValue obj = object->evaluate(env);
+        if (obj.type == ValueType::INSTANCE)
+        {
+            return obj.instanceVal->get(name.lexeme, name.line);
+        }
+        throw RuntimeError("Only instances have properties.", name.line);
+    }
+};
+
+struct SetExpr : Expr
+{
+    std::unique_ptr<Expr> object;
+    Token name;
+    std::unique_ptr<Expr> value;
+    SetExpr(std::unique_ptr<Expr> object, Token name, std::unique_ptr<Expr> value)
+        : object(std::move(object)), name(name), value(std::move(value)) {}
+    std::string print() const override
+    {
+        return object->print() + "." + name.lexeme + " = " + value->print();
+    }
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
+    {
+        LoxValue obj = object->evaluate(env);
+        if (obj.type != ValueType::INSTANCE)
+        {
+            throw RuntimeError("Only instances have fields.", name.line);
+        }
+        LoxValue val = value->evaluate(env);
+        obj.instanceVal->set(name.lexeme, val);
+        return val;
+    }
+};
+
 // ============ Statements ============
 
 struct Stmt
@@ -969,6 +1029,15 @@ private:
                 return std::make_unique<AssignExpr>(name, std::move(value), line);
             }
 
+            // 检查左侧是否为属性访问 (GetExpr)
+            GetExpr* getExpr = dynamic_cast<GetExpr*>(expr.get());
+            if (getExpr)
+            {
+                auto setExpr = std::make_unique<SetExpr>(
+                    std::move(getExpr->object), getExpr->name, std::move(value));
+                return setExpr;
+            }
+
             error(equals, "Invalid assignment target.");
             return nullptr;
         }
@@ -1087,6 +1156,16 @@ private:
                 }
                 Token closeParen = advance();
                 expr = std::make_unique<CallExpr>(std::move(expr), closeParen, std::move(arguments));
+            }
+            else if (check(TokenType::DOT))
+            {
+                advance();
+                if (!check(TokenType::IDENTIFIER))
+                {
+                    throw error(peek(), "Expect property name after '.'.");
+                }
+                Token name = advance();
+                expr = std::make_unique<GetExpr>(std::move(expr), name);
             }
             else
             {
@@ -1708,6 +1787,15 @@ private:
             {
                 resolveExpr(arg.get());
             }
+        }
+        else if (auto e = dynamic_cast<GetExpr*>(expr))
+        {
+            resolveExpr(e->object.get());
+        }
+        else if (auto e = dynamic_cast<SetExpr*>(expr))
+        {
+            resolveExpr(e->value.get());
+            resolveExpr(e->object.get());
         }
         // LiteralExpr: nothing to resolve
     }
