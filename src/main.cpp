@@ -267,6 +267,7 @@ struct LoxCallable
     virtual int arity() const = 0;
     virtual LoxValue call(const std::vector<LoxValue>& args) const = 0;
     virtual std::string name() const = 0;
+    virtual std::string toString() const { return "<fn " + name() + ">"; }
 };
 
 struct LoxValue
@@ -310,7 +311,7 @@ struct LoxValue
                 return s;
             }
             case ValueType::STRING: return strVal;
-            case ValueType::CALLABLE: return "<fn " + callableVal->name() + ">";
+            case ValueType::CALLABLE: return callableVal->toString();
         }
         return "nil";
     }
@@ -837,6 +838,34 @@ void FunctionStmt::execute(std::shared_ptr<Environment> env) const
     env->define(name.lexeme, LoxValue::Callable(function));
 }
 
+// ============ LoxClass ============
+
+struct ClassStmt : Stmt
+{
+    Token name;
+    ClassStmt(Token name) : name(name) {}
+    void execute(std::shared_ptr<Environment> env) const override;
+};
+
+struct LoxClass : LoxCallable
+{
+    std::string className;
+    LoxClass(const std::string& name) : className(name) {}
+    int arity() const override { return 0; }
+    std::string name() const override { return className; }
+    std::string toString() const override { return className; }
+    LoxValue call(const std::vector<LoxValue>& args) const override
+    {
+        return LoxValue::Nil(); // Placeholder for now - instances will come later
+    }
+};
+
+void ClassStmt::execute(std::shared_ptr<Environment> env) const
+{
+    auto klass = std::make_shared<LoxClass>(name.lexeme);
+    env->define(name.lexeme, LoxValue::Callable(klass));
+}
+
 // ============ Parser ============
 
 class Parser
@@ -1123,6 +1152,11 @@ private:
     {
         try
         {
+            if (check(TokenType::CLASS))
+            {
+                advance();
+                return classDeclaration();
+            }
             if (check(TokenType::FUN))
             {
                 advance();
@@ -1140,6 +1174,30 @@ private:
             synchronize();
             return nullptr;
         }
+    }
+
+    std::unique_ptr<Stmt> classDeclaration()
+    {
+        if (!check(TokenType::IDENTIFIER))
+        {
+            throw error(peek(), "Expect class name.");
+        }
+        Token name = advance();
+
+        if (!check(TokenType::LEFT_BRACE))
+        {
+            throw error(peek(), "Expect '{' before class body.");
+        }
+        advance();
+
+        // For now, class body is empty (methods will come in a later stage)
+        if (!check(TokenType::RIGHT_BRACE))
+        {
+            throw error(peek(), "Expect '}' after class body.");
+        }
+        advance();
+
+        return std::make_unique<ClassStmt>(name);
     }
 
     std::unique_ptr<Stmt> funDeclaration()
@@ -1563,6 +1621,11 @@ private:
             declare(s->name.lexeme, s->name.line);
             define(s->name.lexeme);
             resolveFunction(s);
+        }
+        else if (auto s = dynamic_cast<const ClassStmt*>(stmt))
+        {
+            declare(s->name.lexeme, s->name.line);
+            define(s->name.lexeme);
         }
         else if (auto s = dynamic_cast<const ReturnStmt*>(stmt))
         {
