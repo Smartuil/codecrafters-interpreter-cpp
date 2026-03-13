@@ -342,6 +342,18 @@ public:
         throw RuntimeError("Undefined variable '" + name + "'.", line);
     }
 
+    LoxValue getAt(int distance, const std::string& name) const
+    {
+        const Environment* env = this;
+        for (int i = 0; i < distance; i++)
+        {
+            env = env->enclosing_.get();
+        }
+        auto it = env->values_.find(name);
+        if (it != env->values_.end()) return it->second;
+        return LoxValue::Nil();
+    }
+
     void assign(const std::string& name, const LoxValue& value, int line)
     {
         auto it = values_.find(name);
@@ -358,10 +370,23 @@ public:
         throw RuntimeError("Undefined variable '" + name + "'.", line);
     }
 
+    void assignAt(int distance, const std::string& name, const LoxValue& value)
+    {
+        Environment* env = this;
+        for (int i = 0; i < distance; i++)
+        {
+            env = env->enclosing_.get();
+        }
+        env->values_[name] = value;
+    }
+
 private:
     std::shared_ptr<Environment> enclosing_;
     std::map<std::string, LoxValue> values_;
 };
+
+// Global environment pointer for unresolved (global) variable lookups
+static std::shared_ptr<Environment> globalEnvironment;
 
 struct Expr
 {
@@ -518,11 +543,16 @@ struct VariableExpr : Expr
 {
     std::string name;
     int line;
+    mutable int resolvedDistance = -1; // -1 means not resolved (global)
     VariableExpr(const std::string& name, int line) : name(name), line(line) {}
     std::string print() const override { return name; }
     LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
-        return env->get(name, line);
+        if (resolvedDistance >= 0)
+        {
+            return env->getAt(resolvedDistance, name);
+        }
+        return globalEnvironment->get(name, line);
     }
 };
 
@@ -531,13 +561,21 @@ struct AssignExpr : Expr
     std::string name;
     std::unique_ptr<Expr> value;
     int line;
+    mutable int resolvedDistance = -1; // -1 means not resolved (global)
     AssignExpr(const std::string& name, std::unique_ptr<Expr> value, int line)
         : name(name), value(std::move(value)), line(line) {}
     std::string print() const override { return "(= " + name + " " + value->print() + ")"; }
     LoxValue evaluate(std::shared_ptr<Environment> env) const override
     {
         LoxValue val = value->evaluate(env);
-        env->assign(name, val, line);
+        if (resolvedDistance >= 0)
+        {
+            env->assignAt(resolvedDistance, name, val);
+        }
+        else
+        {
+            globalEnvironment->assign(name, val, line);
+        }
         return val;
     }
 };
@@ -1401,6 +1439,172 @@ private:
     }
 };
 
+// ============ Resolver ============
+
+class Resolver
+{
+public:
+    void resolve(const std::vector<std::unique_ptr<Stmt>>& statements)
+    {
+        for (const auto& stmt : statements)
+        {
+            resolveStmt(stmt.get());
+        }
+    }
+
+private:
+    // Each scope maps variable name -> true (defined) / false (declared but not yet defined)
+    std::vector<std::map<std::string, bool>> scopes_;
+
+    void beginScope()
+    {
+        scopes_.push_back(std::map<std::string, bool>());
+    }
+
+    void endScope()
+    {
+        scopes_.pop_back();
+    }
+
+    void declare(const std::string& name)
+    {
+        if (scopes_.empty()) return;
+        scopes_.back()[name] = false;
+    }
+
+    void define(const std::string& name)
+    {
+        if (scopes_.empty()) return;
+        scopes_.back()[name] = true;
+    }
+
+    void resolveLocal(VariableExpr* expr)
+    {
+        for (int i = static_cast<int>(scopes_.size()) - 1; i >= 0; i--)
+        {
+            if (scopes_[i].find(expr->name) != scopes_[i].end())
+            {
+                expr->resolvedDistance = static_cast<int>(scopes_.size()) - 1 - i;
+                return;
+            }
+        }
+        // Not found in any scope => global variable, leave resolvedDistance = -1
+    }
+
+    void resolveLocalAssign(AssignExpr* expr)
+    {
+        for (int i = static_cast<int>(scopes_.size()) - 1; i >= 0; i--)
+        {
+            if (scopes_[i].find(expr->name) != scopes_[i].end())
+            {
+                expr->resolvedDistance = static_cast<int>(scopes_.size()) - 1 - i;
+                return;
+            }
+        }
+        // Not found in any scope => global variable, leave resolvedDistance = -1
+    }
+
+    void resolveStmt(const Stmt* stmt)
+    {
+        if (auto s = dynamic_cast<const PrintStmt*>(stmt))
+        {
+            resolveExpr(s->expr.get());
+        }
+        else if (auto s = dynamic_cast<const ExpressionStmt*>(stmt))
+        {
+            resolveExpr(s->expr.get());
+        }
+        else if (auto s = dynamic_cast<const VarStmt*>(stmt))
+        {
+            declare(s->name);
+            if (s->initializer)
+            {
+                resolveExpr(s->initializer.get());
+            }
+            define(s->name);
+        }
+        else if (auto s = dynamic_cast<const BlockStmt*>(stmt))
+        {
+            beginScope();
+            resolve(s->statements);
+            endScope();
+        }
+        else if (auto s = dynamic_cast<const IfStmt*>(stmt))
+        {
+            resolveExpr(s->condition.get());
+            resolveStmt(s->thenBranch.get());
+            if (s->elseBranch) resolveStmt(s->elseBranch.get());
+        }
+        else if (auto s = dynamic_cast<const WhileStmt*>(stmt))
+        {
+            resolveExpr(s->condition.get());
+            resolveStmt(s->body.get());
+        }
+        else if (auto s = dynamic_cast<const FunctionStmt*>(stmt))
+        {
+            declare(s->name.lexeme);
+            define(s->name.lexeme);
+            resolveFunction(s);
+        }
+        else if (auto s = dynamic_cast<const ReturnStmt*>(stmt))
+        {
+            if (s->value) resolveExpr(s->value.get());
+        }
+    }
+
+    void resolveFunction(const FunctionStmt* func)
+    {
+        beginScope();
+        for (const auto& param : func->params)
+        {
+            declare(param.lexeme);
+            define(param.lexeme);
+        }
+        resolve(func->body);
+        endScope();
+    }
+
+    void resolveExpr(Expr* expr)
+    {
+        if (auto e = dynamic_cast<VariableExpr*>(expr))
+        {
+            resolveLocal(e);
+        }
+        else if (auto e = dynamic_cast<AssignExpr*>(expr))
+        {
+            resolveExpr(e->value.get());
+            resolveLocalAssign(e);
+        }
+        else if (auto e = dynamic_cast<BinaryExpr*>(expr))
+        {
+            resolveExpr(e->left.get());
+            resolveExpr(e->right.get());
+        }
+        else if (auto e = dynamic_cast<UnaryExpr*>(expr))
+        {
+            resolveExpr(e->right.get());
+        }
+        else if (auto e = dynamic_cast<GroupExpr*>(expr))
+        {
+            resolveExpr(e->expr.get());
+        }
+        else if (auto e = dynamic_cast<LogicalExpr*>(expr))
+        {
+            resolveExpr(e->left.get());
+            resolveExpr(e->right.get());
+        }
+        else if (auto e = dynamic_cast<CallExpr*>(expr))
+        {
+            resolveExpr(e->callee.get());
+            for (const auto& arg : e->arguments)
+            {
+                resolveExpr(arg.get());
+            }
+        }
+        // LiteralExpr: nothing to resolve
+    }
+};
+
 // ============ Helpers ============
 
 std::string read_file_contents(const std::string& filename);
@@ -1479,6 +1683,7 @@ int main(int argc, char *argv[])
             try
             {
                 auto env = std::make_shared<Environment>();
+                globalEnvironment = env;
                 LoxValue result = expr->evaluate(env);
                 std::cout << result.toString() << std::endl;
             }
@@ -1501,9 +1706,14 @@ int main(int argc, char *argv[])
         auto stmts = parser.parseStatements();
         if (parser.hasError()) return 65;
 
+        // Resolve variable bindings
+        Resolver resolver;
+        resolver.resolve(stmts);
+
         try
         {
             auto env = std::make_shared<Environment>();
+            globalEnvironment = env;
             env->define("clock", LoxValue::Callable(std::make_shared<ClockNative>()));
             for (const auto& stmt : stmts)
             {
