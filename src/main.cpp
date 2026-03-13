@@ -333,18 +333,6 @@ struct LoxValue
     }
 };
 
-LoxValue LoxInstance::get(const std::string& name, int line) const
-{
-    auto it = fields.find(name);
-    if (it != fields.end()) return it->second;
-    throw RuntimeError("Undefined property '" + name + "'.", line);
-}
-
-void LoxInstance::set(const std::string& name, const LoxValue& value)
-{
-    fields[name] = value;
-}
-
 struct ReturnValue
 {
     LoxValue value;
@@ -918,17 +906,29 @@ void FunctionStmt::execute(std::shared_ptr<Environment> env) const
 struct ClassStmt : Stmt
 {
     Token name;
-    ClassStmt(Token name) : name(name) {}
+    std::vector<std::unique_ptr<FunctionStmt>> methods;
+    ClassStmt(Token name, std::vector<std::unique_ptr<FunctionStmt>> methods)
+        : name(name), methods(std::move(methods)) {}
     void execute(std::shared_ptr<Environment> env) const override;
 };
 
 struct LoxClass : LoxCallable, public std::enable_shared_from_this<LoxClass>
 {
     std::string className;
-    LoxClass(const std::string& name) : className(name) {}
+    std::map<std::string, std::shared_ptr<LoxFunction>> methods;
+    LoxClass(const std::string& name, std::map<std::string, std::shared_ptr<LoxFunction>> methods)
+        : className(name), methods(std::move(methods)) {}
     int arity() const override { return 0; }
     std::string name() const override { return className; }
     std::string toString() const override { return className; }
+
+    std::shared_ptr<LoxFunction> findMethod(const std::string& name) const
+    {
+        auto it = methods.find(name);
+        if (it != methods.end()) return it->second;
+        return nullptr;
+    }
+
     LoxValue call(const std::vector<LoxValue>& args) const override
     {
         auto instance = std::make_shared<LoxInstance>(
@@ -942,10 +942,35 @@ std::string LoxInstance::toString() const
     return klass->className + " instance";
 }
 
+LoxValue LoxInstance::get(const std::string& name, int line) const
+{
+    auto it = fields.find(name);
+    if (it != fields.end()) return it->second;
+
+    auto method = klass->findMethod(name);
+    if (method) return LoxValue::Callable(method);
+
+    throw RuntimeError("Undefined property '" + name + "'.", line);
+}
+
+void LoxInstance::set(const std::string& name, const LoxValue& value)
+{
+    fields[name] = value;
+}
+
 void ClassStmt::execute(std::shared_ptr<Environment> env) const
 {
-    auto klass = std::make_shared<LoxClass>(name.lexeme);
-    env->define(name.lexeme, LoxValue::Callable(klass));
+    env->define(name.lexeme, LoxValue::Nil());
+
+    std::map<std::string, std::shared_ptr<LoxFunction>> methodMap;
+    for (const auto& method : methods)
+    {
+        auto function = std::make_shared<LoxFunction>(method.get(), env);
+        methodMap[method->name.lexeme] = function;
+    }
+
+    auto klass = std::make_shared<LoxClass>(name.lexeme, std::move(methodMap));
+    env->assign(name.lexeme, LoxValue::Callable(klass), name.line);
 }
 
 // ============ Parser ============
@@ -1291,14 +1316,73 @@ private:
         }
         advance();
 
-        // For now, class body is empty (methods will come in a later stage)
+        std::vector<std::unique_ptr<FunctionStmt>> methods;
+        while (!check(TokenType::RIGHT_BRACE) && !isAtEnd())
+        {
+            // Methods are like function declarations but without the "fun" keyword
+            if (!check(TokenType::IDENTIFIER))
+            {
+                throw error(peek(), "Expect method name.");
+            }
+            Token methodName = advance();
+
+            if (!check(TokenType::LEFT_PAREN))
+            {
+                throw error(peek(), "Expect '(' after method name.");
+            }
+            advance();
+
+            std::vector<Token> params;
+            if (!check(TokenType::RIGHT_PAREN))
+            {
+                do
+                {
+                    if (params.size() >= 255)
+                    {
+                        error(peek(), "Can't have more than 255 parameters.");
+                    }
+                    if (!check(TokenType::IDENTIFIER))
+                    {
+                        throw error(peek(), "Expect parameter name.");
+                    }
+                    params.push_back(advance());
+                } while (check(TokenType::COMMA) && (advance(), true));
+            }
+
+            if (!check(TokenType::RIGHT_PAREN))
+            {
+                throw error(peek(), "Expect ')' after parameters.");
+            }
+            advance();
+
+            if (!check(TokenType::LEFT_BRACE))
+            {
+                throw error(peek(), "Expect '{' before method body.");
+            }
+            advance();
+
+            std::vector<std::unique_ptr<Stmt>> body;
+            while (!check(TokenType::RIGHT_BRACE) && !isAtEnd())
+            {
+                auto s = declaration();
+                if (s) body.push_back(std::move(s));
+            }
+            if (!check(TokenType::RIGHT_BRACE))
+            {
+                throw error(peek(), "Expect '}' after method body.");
+            }
+            advance();
+
+            methods.push_back(std::make_unique<FunctionStmt>(methodName, std::move(params), std::move(body)));
+        }
+
         if (!check(TokenType::RIGHT_BRACE))
         {
             throw error(peek(), "Expect '}' after class body.");
         }
         advance();
 
-        return std::make_unique<ClassStmt>(name);
+        return std::make_unique<ClassStmt>(name, std::move(methods));
     }
 
     std::unique_ptr<Stmt> funDeclaration()
@@ -1727,6 +1811,11 @@ private:
         {
             declare(s->name.lexeme, s->name.line);
             define(s->name.lexeme);
+
+            for (const auto& method : s->methods)
+            {
+                resolveFunction(method.get());
+            }
         }
         else if (auto s = dynamic_cast<const ReturnStmt*>(stmt))
         {
