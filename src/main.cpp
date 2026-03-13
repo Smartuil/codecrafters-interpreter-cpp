@@ -273,13 +273,13 @@ struct LoxCallable
 
 struct LoxClass;
 
-struct LoxInstance
+struct LoxInstance : public std::enable_shared_from_this<LoxInstance>
 {
     std::shared_ptr<LoxClass> klass;
     std::map<std::string, LoxValue> fields;
     LoxInstance(std::shared_ptr<LoxClass> klass) : klass(klass) {}
     std::string toString() const;
-    LoxValue get(const std::string& name, int line) const;
+    LoxValue get(const std::string& name, int line);
     void set(const std::string& name, const LoxValue& value);
 };
 
@@ -731,6 +731,24 @@ struct SetExpr : Expr
     }
 };
 
+// ============ This Expression ============
+
+struct ThisExpr : Expr
+{
+    Token keyword;
+    mutable int resolvedDepth = -1;
+    ThisExpr(Token keyword) : keyword(keyword) {}
+    std::string print() const override { return "this"; }
+    LoxValue evaluate(std::shared_ptr<Environment> env) const override
+    {
+        if (resolvedDepth >= 0)
+        {
+            return env->getAt(resolvedDepth, "this");
+        }
+        return env->get("this", keyword.line);
+    }
+};
+
 // ============ Statements ============
 
 struct Stmt
@@ -873,6 +891,14 @@ struct LoxFunction : LoxCallable
         : declaration(decl), closure(closure) {}
     int arity() const override { return static_cast<int>(declaration->params.size()); }
     std::string name() const override { return declaration->name.lexeme; }
+
+    std::shared_ptr<LoxFunction> bind(std::shared_ptr<LoxInstance> instance) const
+    {
+        auto env = std::make_shared<Environment>(closure);
+        env->define("this", LoxValue::Instance(instance));
+        return std::make_shared<LoxFunction>(declaration, env);
+    }
+
     LoxValue call(const std::vector<LoxValue>& args) const override
     {
         auto funcEnv = std::make_shared<Environment>(closure);
@@ -942,13 +968,13 @@ std::string LoxInstance::toString() const
     return klass->className + " instance";
 }
 
-LoxValue LoxInstance::get(const std::string& name, int line) const
+LoxValue LoxInstance::get(const std::string& name, int line)
 {
     auto it = fields.find(name);
     if (it != fields.end()) return it->second;
 
     auto method = klass->findMethod(name);
-    if (method) return LoxValue::Callable(method);
+    if (method) return LoxValue::Callable(method->bind(shared_from_this()));
 
     throw RuntimeError("Undefined property '" + name + "'.", line);
 }
@@ -1234,6 +1260,12 @@ private:
         {
             Token tok = advance();
             return std::make_unique<VariableExpr>(tok.lexeme, tok.line);
+        }
+
+        if (check(TokenType::THIS))
+        {
+            Token tok = advance();
+            return std::make_unique<ThisExpr>(tok);
         }
 
         if (check(TokenType::LEFT_PAREN))
@@ -1752,6 +1784,19 @@ private:
         // Not found in any scope => global variable, leave resolvedDistance = -1
     }
 
+    void resolveLocal(int& resolvedDepth, const std::string& name)
+    {
+        for (int i = static_cast<int>(scopes_.size()) - 1; i >= 0; i--)
+        {
+            if (scopes_[i].find(name) != scopes_[i].end())
+            {
+                resolvedDepth = static_cast<int>(scopes_.size()) - 1 - i;
+                return;
+            }
+        }
+        // Not found in any scope => leave as -1
+    }
+
     void resolveLocalAssign(AssignExpr* expr)
     {
         for (int i = static_cast<int>(scopes_.size()) - 1; i >= 0; i--)
@@ -1812,10 +1857,15 @@ private:
             declare(s->name.lexeme, s->name.line);
             define(s->name.lexeme);
 
+            beginScope();
+            scopes_.back()["this"] = true;
+
             for (const auto& method : s->methods)
             {
                 resolveFunction(method.get());
             }
+
+            endScope();
         }
         else if (auto s = dynamic_cast<const ReturnStmt*>(stmt))
         {
@@ -1887,6 +1937,10 @@ private:
         {
             resolveExpr(e->value.get());
             resolveExpr(e->object.get());
+        }
+        else if (auto e = dynamic_cast<ThisExpr*>(expr))
+        {
+            resolveLocal(e->resolvedDepth, "this");
         }
         // LiteralExpr: nothing to resolve
     }
