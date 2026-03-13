@@ -257,9 +257,10 @@ private:
 
 // ============ AST ============
 
-enum class ValueType { NIL, BOOL, NUMBER, STRING, CALLABLE };
+enum class ValueType { NIL, BOOL, NUMBER, STRING, CALLABLE, INSTANCE };
 
 struct LoxValue;
+struct LoxInstance;
 
 struct LoxCallable
 {
@@ -270,6 +271,15 @@ struct LoxCallable
     virtual std::string toString() const { return "<fn " + name() + ">"; }
 };
 
+struct LoxClass;
+
+struct LoxInstance
+{
+    std::shared_ptr<LoxClass> klass;
+    LoxInstance(std::shared_ptr<LoxClass> klass) : klass(klass) {}
+    std::string toString() const;
+};
+
 struct LoxValue
 {
     ValueType type;
@@ -277,12 +287,14 @@ struct LoxValue
     double numVal = 0.0;
     std::string strVal;
     std::shared_ptr<LoxCallable> callableVal;
+    std::shared_ptr<LoxInstance> instanceVal;
 
     static LoxValue Nil() { return {ValueType::NIL}; }
-    static LoxValue Bool(bool b) { return {ValueType::BOOL, b, 0.0, "", nullptr}; }
-    static LoxValue Number(double n) { return {ValueType::NUMBER, false, n, "", nullptr}; }
-    static LoxValue String(const std::string& s) { return {ValueType::STRING, false, 0.0, s, nullptr}; }
-    static LoxValue Callable(std::shared_ptr<LoxCallable> c) { return {ValueType::CALLABLE, false, 0.0, "", c}; }
+    static LoxValue Bool(bool b) { return {ValueType::BOOL, b, 0.0, "", nullptr, nullptr}; }
+    static LoxValue Number(double n) { return {ValueType::NUMBER, false, n, "", nullptr, nullptr}; }
+    static LoxValue String(const std::string& s) { return {ValueType::STRING, false, 0.0, s, nullptr, nullptr}; }
+    static LoxValue Callable(std::shared_ptr<LoxCallable> c) { return {ValueType::CALLABLE, false, 0.0, "", c, nullptr}; }
+    static LoxValue Instance(std::shared_ptr<LoxInstance> i) { return {ValueType::INSTANCE, false, 0.0, "", nullptr, i}; }
 
     std::string toString() const
     {
@@ -312,6 +324,7 @@ struct LoxValue
             }
             case ValueType::STRING: return strVal;
             case ValueType::CALLABLE: return callableVal->toString();
+            case ValueType::INSTANCE: return instanceVal->toString();
         }
         return "nil";
     }
@@ -847,7 +860,7 @@ struct ClassStmt : Stmt
     void execute(std::shared_ptr<Environment> env) const override;
 };
 
-struct LoxClass : LoxCallable
+struct LoxClass : LoxCallable, public std::enable_shared_from_this<LoxClass>
 {
     std::string className;
     LoxClass(const std::string& name) : className(name) {}
@@ -856,9 +869,16 @@ struct LoxClass : LoxCallable
     std::string toString() const override { return className; }
     LoxValue call(const std::vector<LoxValue>& args) const override
     {
-        return LoxValue::Nil(); // Placeholder for now - instances will come later
+        auto instance = std::make_shared<LoxInstance>(
+            std::const_pointer_cast<LoxClass>(shared_from_this()));
+        return LoxValue::Instance(instance);
     }
 };
+
+std::string LoxInstance::toString() const
+{
+    return klass->className + " instance";
+}
 
 void ClassStmt::execute(std::shared_ptr<Environment> env) const
 {
