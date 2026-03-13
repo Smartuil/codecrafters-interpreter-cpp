@@ -279,18 +279,8 @@ struct LoxInstance
     std::map<std::string, LoxValue> fields;
     LoxInstance(std::shared_ptr<LoxClass> klass) : klass(klass) {}
     std::string toString() const;
-
-    LoxValue get(const std::string& name, int line) const
-    {
-        auto it = fields.find(name);
-        if (it != fields.end()) return it->second;
-        throw RuntimeError("Undefined property '" + name + "'.", line);
-    }
-
-    void set(const std::string& name, const LoxValue& value)
-    {
-        fields[name] = value;
-    }
+    LoxValue get(const std::string& name, int line) const;
+    void set(const std::string& name, const LoxValue& value);
 };
 
 struct LoxValue
@@ -342,6 +332,18 @@ struct LoxValue
         return "nil";
     }
 };
+
+LoxValue LoxInstance::get(const std::string& name, int line) const
+{
+    auto it = fields.find(name);
+    if (it != fields.end()) return it->second;
+    throw RuntimeError("Undefined property '" + name + "'.", line);
+}
+
+void LoxInstance::set(const std::string& name, const LoxValue& value)
+{
+    fields[name] = value;
+}
 
 struct ReturnValue
 {
