@@ -1444,6 +1444,8 @@ private:
 class Resolver
 {
 public:
+    bool hasError() const { return hasError_; }
+
     void resolve(const std::vector<std::unique_ptr<Stmt>>& statements)
     {
         for (const auto& stmt : statements)
@@ -1455,6 +1457,7 @@ public:
 private:
     // Each scope maps variable name -> true (defined) / false (declared but not yet defined)
     std::vector<std::map<std::string, bool>> scopes_;
+    bool hasError_ = false;
 
     void beginScope()
     {
@@ -1482,8 +1485,15 @@ private:
     {
         for (int i = static_cast<int>(scopes_.size()) - 1; i >= 0; i--)
         {
-            if (scopes_[i].find(expr->name) != scopes_[i].end())
+            auto it = scopes_[i].find(expr->name);
+            if (it != scopes_[i].end())
             {
+                if (i == static_cast<int>(scopes_.size()) - 1 && it->second == false)
+                {
+                    std::cerr << "[line " << expr->line << "] Error at '" << expr->name
+                              << "': Can't read local variable in its own initializer." << std::endl;
+                    hasError_ = true;
+                }
                 expr->resolvedDistance = static_cast<int>(scopes_.size()) - 1 - i;
                 return;
             }
@@ -1709,6 +1719,7 @@ int main(int argc, char *argv[])
         // Resolve variable bindings
         Resolver resolver;
         resolver.resolve(stmts);
+        if (resolver.hasError()) return 65;
 
         try
         {
