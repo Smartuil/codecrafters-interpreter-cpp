@@ -1459,6 +1459,7 @@ private:
     // Each scope maps variable name -> true (defined) / false (declared but not yet defined)
     std::vector<std::map<std::string, bool>> scopes_;
     bool hasError_ = false;
+    int inFunction_ = 0;
 
     void beginScope()
     {
@@ -1565,12 +1566,18 @@ private:
         }
         else if (auto s = dynamic_cast<const ReturnStmt*>(stmt))
         {
+            if (inFunction_ == 0)
+            {
+                std::cerr << "[line " << s->keyword.line << "] Error at 'return': Can't return from top-level code." << std::endl;
+                hasError_ = true;
+            }
             if (s->value) resolveExpr(s->value.get());
         }
     }
 
     void resolveFunction(const FunctionStmt* func)
     {
+        inFunction_++;
         beginScope();
         for (const auto& param : func->params)
         {
@@ -1579,6 +1586,7 @@ private:
         }
         resolve(func->body);
         endScope();
+        inFunction_--;
     }
 
     void resolveExpr(Expr* expr)
