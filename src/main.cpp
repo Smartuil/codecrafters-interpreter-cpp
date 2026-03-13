@@ -1731,10 +1731,13 @@ public:
     }
 
 private:
+    enum class ClassType { NONE, CLASS };
+
     // Each scope maps variable name -> true (defined) / false (declared but not yet defined)
     std::vector<std::map<std::string, bool>> scopes_;
     bool hasError_ = false;
     int inFunction_ = 0;
+    ClassType currentClass_ = ClassType::NONE;
 
     void beginScope()
     {
@@ -1854,6 +1857,9 @@ private:
         }
         else if (auto s = dynamic_cast<const ClassStmt*>(stmt))
         {
+            ClassType enclosingClass = currentClass_;
+            currentClass_ = ClassType::CLASS;
+
             declare(s->name.lexeme, s->name.line);
             define(s->name.lexeme);
 
@@ -1866,6 +1872,8 @@ private:
             }
 
             endScope();
+
+            currentClass_ = enclosingClass;
         }
         else if (auto s = dynamic_cast<const ReturnStmt*>(stmt))
         {
@@ -1940,6 +1948,12 @@ private:
         }
         else if (auto e = dynamic_cast<ThisExpr*>(expr))
         {
+            if (currentClass_ == ClassType::NONE)
+            {
+                std::cerr << "[line " << e->keyword.line << "] Error at 'this': Can't use 'this' outside of a class." << std::endl;
+                hasError_ = true;
+                return;
+            }
             resolveLocal(e->resolvedDepth, "this");
         }
         // LiteralExpr: nothing to resolve
